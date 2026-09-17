@@ -1,19 +1,73 @@
-# System Architecture
+# Architecture
 
 ## 1. Overview
 
-## 2. Architectural Principles
+```text
+CDC Historical Public-Health Data
+             |
+             v
+     Python Replay Producer
+             |
+       Kafka protocol
+             |
+             v
+      Azure Event Hubs
+             |
+             v
+        ADLS Bronze
+             |
+             v
+      Silver -> Gold
+             |
+       +-----+------+
+       |            |
+       v            v
+Synapse Serverless  Databricks
+       |            |
+       v            v
+   Power BI       ML outputs
+                      |
+                      v
+                  ADLS Gold
+                      |
+                      v
+                  Power BI
+```
 
-## 3. End-to-End Architecture
+## 2. Batch Ingestion
 
-## 4. Data Source Layer
+```text
+openFDA API
+    |
+    v
+Azure Data Factory
+    |
+    v
+ADLS Raw
+    |
+    v
+Bronze
+    |
+    v
+Silver
+    |
+    v
+Gold
+```
 
-## 5. Ingestion Layer
+## 3. Storage Zone
 
-## 6. Azure Data Platform
+#### RAW
+Source data captured with minimal transformation.
 
-#### RAW 
+#### BRONZE  
+Validated source records with ingestion metadata.
 
-#### SILVER
+#### SILVER  
+Cleaned, typed and standardized data.
 
 #### GOLD
+Business-ready analytical datasets.
+
+
+
