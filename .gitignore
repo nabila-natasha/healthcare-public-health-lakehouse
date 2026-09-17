@@ -1,7 +1,20 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
+*.pyc
 *.py[codz]
 *$py.class
+
+# Terraform
+terraform/.terraform/
+terraform.tfstate
+terraform.tfstate.*
+*.tfvars
+*.tfvars.json
+
+# Credentials
+client_secret*
+credentials*
+secrets*
 
 # C extensions
 *.so
@@ -149,6 +162,7 @@ activemq-data/
 
 # Environments
 .env
+*.env
 .envrc
 .venv
 env/
