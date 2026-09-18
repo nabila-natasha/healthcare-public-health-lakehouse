@@ -19,7 +19,7 @@
 |---|---|
 | 1. Azure account | PASS |
 | 2. Cloud Shell | PASS |
-| 3. Resource group | NOT TESTED |
+| 3. Resource group | PASS |
 | 4. ADLS Gen2 | NOT TESTED |
 | 5. Event Hubs Kafka | NOT TESTED |
 | 6. Synapse Serverless | NOT TESTED |
