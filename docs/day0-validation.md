@@ -24,8 +24,8 @@
 | 5. Event Hubs Kafka | PASS - Validated Kafka-compatible streaming connectivity between a Python producer, Azure Event Hubs, and a Kafka consumer using the Event Hubs Kafka endpoint and SASL/SSL authentication. |
 | 6. Synapse Serverless | PASS |
 | 7. dbt | PASS |
-| 8. Power BI | NOT TESTED |
-| 9. Databricks Free Edition | NOT TESTED |
+| 8. Power BI | PASS |
+| 9. Databricks Free Edition | PASS |
 
 ## Architecture decisions
 
