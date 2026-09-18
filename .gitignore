@@ -16,6 +16,16 @@ client_secret*
 credentials*
 secrets*
 
+# Local secrets
+.env
+.env.*
+!.env.example
+secrets.local
+*.secret
+
+# Azure local state
+.azure/
+
 # C extensions
 *.so
 
