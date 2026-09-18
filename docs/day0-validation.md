@@ -5,35 +5,36 @@
 
 ## Account
 
-- Subscription name:
-- Subscription ID: REDACTED
-- Tenant ID: REDACTED
-- Trial start date:
-- Trial end date:
-- Starting credit:
+- Azure Free Account: PASS
+- Subscription name: [record privately]
+- Subscription ID: [DO NOT COMMIT]
+- Tenant ID: [DO NOT COMMIT]
+- Trial start date: [private]
+- Trial end date: [private]
+- Starting credit: [private]
 
-## Gate Results
+## Gates
 
-| Gate | Status | Notes |
-|---|---|---|
-| Azure Free Account | ⬜ | |
-| Cloud Shell | ⬜ | |
-| Temporary Resource Group | ⬜ | |
-| ADLS Gen2 | ⬜ | |
-| Event Hubs Kafka | ⬜ | |
-| Synapse Serverless | ⬜ | |
-| dbt | ⬜ | |
-| Power BI | ⬜ | |
-| Databricks Free Edition | ⬜ | |
+| Gate | Result |
+|---|---|
+| 1. Azure account | PASS |
+| 2. Cloud Shell | NOT TESTED |
+| 3. Resource group | NOT TESTED |
+| 4. ADLS Gen2 | NOT TESTED |
+| 5. Event Hubs Kafka | NOT TESTED |
+| 6. Synapse Serverless | NOT TESTED |
+| 7. dbt | NOT TESTED |
+| 8. Power BI | NOT TESTED |
+| 9. Databricks Free Edition | NOT TESTED |
 
-## Architecture Decisions
+## Architecture decisions
 
 - Storage format:
 - Streaming protocol:
 - Synapse serving approach:
 - dbt decision:
 
-## Issues Encountered
+## Issues encountered
 
 ## Resolutions
 
