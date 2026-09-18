@@ -107,7 +107,7 @@ Synapse Serverless SQL will remain available for SQL-based querying and validati
 
 A Synapse Dedicated SQL Pool will not be created solely to support dbt.
 
-#### 6. Gate Result
+### 6. Gate Result
 
 **PASS** — dbt evaluation completed.
 
@@ -116,5 +116,10 @@ The result is an intentional architectural decision, not a failed installation.
 Reference:
 
 `docs/adr/ADR-006-dbT-runtime-decision.md`
+
+### Interview Talking Point
+
+> "I evaluated dbt against the selected Synapse architecture. The official Synapse adapter targets Dedicated SQL Pools, while my architecture deliberately uses Serverless SQL to query ADLS without introducing a dedicated warehouse. Rather than add infrastructure solely to accommodate dbt, I kept Databricks as the primary transformation engine and documented the trade-off in an ADR."
+
 
 ## Evidence
