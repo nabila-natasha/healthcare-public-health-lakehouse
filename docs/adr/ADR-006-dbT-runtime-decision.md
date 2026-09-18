@@ -18,6 +18,28 @@ The official `dbt-synapse` adapter targets Azure Synapse Dedicated SQL Pools. Us
 
 Creating a Dedicated SQL Pool solely to accommodate dbt would add an additional Azure resource and cost without providing a requirement-driven benefit to the project.
 
+```text
+dbt Core installed
+       ↓
+Adapter initially unavailable
+       ↓
+Investigated
+       ↓
+dbt-synapse discovered/installed
+       ↓
+Adapter available
+       ↓
+Checked architecture
+       ↓
+dbt-synapse → Dedicated SQL Pool
+       ↓
+Our architecture → Serverless SQL
+       ↓
+Don't create Dedicated SQL Pool
+       ↓
+DROP dbt from core runtime
+```
+
 ## Decision
 
 dbt will **not be used as a runtime transformation engine** in the core project architecture.
