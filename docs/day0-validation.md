@@ -21,8 +21,8 @@
 | 2. Cloud Shell | PASS |
 | 3. Resource group | PASS |
 | 4. ADLS Gen2 | PASS |
-| 5. Event Hubs Kafka | NOT TESTED |
-| 6. Synapse Serverless | NOT TESTED |
+| 5. Event Hubs Kafka | PASS - Validated Kafka-compatible streaming connectivity between a Python producer, Azure Event Hubs, and a Kafka consumer using the Event Hubs Kafka endpoint and SASL/SSL authentication. |
+| 6. Synapse Serverless | PASS |
 | 7. dbt | NOT TESTED |
 | 8. Power BI | NOT TESTED |
 | 9. Databricks Free Edition | NOT TESTED |
