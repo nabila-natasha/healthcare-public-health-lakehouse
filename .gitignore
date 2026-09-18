@@ -23,8 +23,17 @@ secrets*
 secrets.local
 *.secret
 
-# Azure local state
+# Azure local files
 .azure/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Jupyter
+.ipynb_checkpoints/
 
 # C extensions
 *.so
@@ -97,9 +106,6 @@ docs/_build/
 # PyBuilder
 .pybuilder/
 target/
-
-# Jupyter Notebook
-.ipynb_checkpoints
 
 # IPython
 profile_default/
