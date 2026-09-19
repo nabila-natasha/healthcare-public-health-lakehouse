@@ -1,0 +1,11 @@
+event_id,event_time,patient_id,event_type,region,status
+cdc-0001,2026-09-19T08:00:00Z,P001,admission,MY,active
+cdc-0002,2026-09-19T08:00:05Z,P002,discharge,MY,closed
+cdc-0003,2026-09-19T08:00:10Z,P003,admission,SG,active
+cdc-0004,2026-09-19T08:00:15Z,P004,transfer,MY,active
+cdc-0005,2026-09-19T08:00:20Z,P005,admission,TH,active
+cdc-0006,2026-09-19T08:00:25Z,P006,discharge,SG,closed
+cdc-0007,2026-09-19T08:00:30Z,P007,admission,MY,active
+cdc-0008,2026-09-19T08:00:35Z,P008,transfer,SG,active
+cdc-0009,2026-09-19T08:00:40Z,P009,admission,MY,active
+cdc-0010,2026-09-19T08:00:45Z,P010,discharge,TH,closed
