@@ -72,7 +72,11 @@ healthcare/
 └── quarantine/
 ```
 
-The older storage account `stlakehouse123` remains temporarily because the Synapse workspace was originally created with it as its immutable default data lake storage reference. It is not used as the primary project data lake.
+The older storage account `stlakehouse123` remains temporarily because the Synapse workspace was initially provisioned with a separate ADLS Gen2 account (`stlakehouse123`) as its immutable default workspace storage. Azure does not permit changing the workspace's defaultDataLakeStorage configuration after creation.
+
+The project therefore uses stlakehousebello/healthcare as its explicit application data lake. Synapse Serverless has been validated against this storage account, and Azure Data Factory has also been validated against it using managed identity and RBAC.
+
+The original Synapse default storage is retained as workspace infrastructure and is not used as the project's application data lake.
 
 ---
 
