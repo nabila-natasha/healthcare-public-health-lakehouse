@@ -203,7 +203,7 @@ This separation avoids making the critical Azure ingestion pipeline dependent on
 Reference:
 
 ```text
-docs/adr/ADR-007-databricks-free-edition-integration.md
+docs/adr/ADR-005-databricks-free-edition-integration.md
 ```
 
 ---
@@ -565,7 +565,7 @@ The critical Azure ingestion path does not depend on direct external connectivit
 Reference:
 
 ```text
-docs/adr/ADR-007-databricks-free-edition-integration.md
+docs/adr/ADR-005-databricks-free-edition-integration.md
 ```
 
 ---
