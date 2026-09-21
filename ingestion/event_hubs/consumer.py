@@ -7,10 +7,6 @@ from confluent_kafka import Consumer
 from azure.storage.filedatalake import DataLakeServiceClient
 
 
-# ============================================================
-# CONFIGURATION
-# ============================================================
-
 EVENT_HUB_NAME = "healthcare-events"
 
 EVENT_HUB_BOOTSTRAP_SERVER = (
@@ -20,29 +16,34 @@ EVENT_HUB_BOOTSTRAP_SERVER = (
 STORAGE_ACCOUNT = "stlakehousebello"
 FILESYSTEM = "healthcare"
 
-RAW_PREFIX = "raw/cdc"
-BRONZE_PREFIX = "bronze/cdc"
-QUARANTINE_PREFIX = "quarantine/cdc"
+RAW_PREFIX = os.getenv("RAW_PREFIX", "raw/cdc")
+BRONZE_PREFIX = os.getenv("BRONZE_PREFIX", "bronze/cdc")
+QUARANTINE_PREFIX = os.getenv("QUARANTINE_PREFIX", "quarantine/cdc")
 
-REQUIRED_FIELDS = [
+REQUIRED_EVENT_FIELDS = [
     "event_id",
     "event_time",
     "ingestion_time",
     "source",
-    "patient_id",
-    "event_type",
-    "region",
-    "status",
+    "source_dataset_id",
+    "payload",
+]
+
+REQUIRED_PAYLOAD_FIELDS = [
+    "date_updated",
+    "state",
+    "start_date",
+    "end_date",
+    "tot_cases",
+    "new_cases",
+    "tot_deaths",
+    "new_deaths",
+    "new_historic_cases",
+    "new_historic_deaths",
 ]
 
 
-# ============================================================
-# HELPER FUNCTIONS
-# ============================================================
-
 def get_required_env(name):
-    """Read a required environment variable."""
-
     value = os.getenv(name)
 
     if not value:
@@ -54,25 +55,23 @@ def get_required_env(name):
 
 
 def utc_now():
-    """Return the current UTC timestamp."""
-
     return datetime.now(timezone.utc).isoformat()
 
 
 def validate_event(event):
     """
-    Validate that a CDC event contains all required fields.
+    Validate the event envelope and CDC payload.
     """
 
     missing_fields = [
         field
-        for field in REQUIRED_FIELDS
+        for field in REQUIRED_EVENT_FIELDS
         if field not in event
     ]
 
     if missing_fields:
         return False, (
-            "Missing required fields: "
+            "Missing event fields: "
             + ", ".join(missing_fields)
         )
 
@@ -82,13 +81,25 @@ def validate_event(event):
     if not event["event_time"]:
         return False, "event_time is empty"
 
+    if not isinstance(event["payload"], dict):
+        return False, "payload is not an object"
+
+    missing_payload_fields = [
+        field
+        for field in REQUIRED_PAYLOAD_FIELDS
+        if field not in event["payload"]
+    ]
+
+    if missing_payload_fields:
+        return False, (
+            "Missing payload fields: "
+            + ", ".join(missing_payload_fields)
+        )
+
     return True, ""
 
 
 def upload_json(file_system_client, path, payload):
-    """
-    Write a JSON object to ADLS Gen2.
-    """
 
     file_client = file_system_client.get_file_client(path)
 
@@ -103,15 +114,7 @@ def upload_json(file_system_client, path, payload):
     )
 
 
-# ============================================================
-# MAIN CONSUMER
-# ============================================================
-
 def main():
-
-    # --------------------------------------------------------
-    # 1. Read secrets from environment variables
-    # --------------------------------------------------------
 
     event_hub_connection_string = get_required_env(
         "EVENT_HUB_CONNECTION_STRING"
@@ -121,40 +124,18 @@ def main():
         "AZURE_STORAGE_CONNECTION_STRING"
     )
 
-
-    # --------------------------------------------------------
-    # 2. Configure Kafka-compatible Event Hubs consumer
-    # --------------------------------------------------------
-
     consumer_config = {
         "bootstrap.servers": EVENT_HUB_BOOTSTRAP_SERVER,
-
         "security.protocol": "SASL_SSL",
-
         "sasl.mechanisms": "PLAIN",
-
         "sasl.username": "$ConnectionString",
-
         "sasl.password": event_hub_connection_string,
-
-        "group.id": "healthcare-bronze-consumer-v1",
-
-        "auto.offset.reset": "earliest",
-
+        "group.id": os.getenv("EVENT_HUB_CONSUMER_GROUP", "healthcare-bronze-consumer-day4-v3"),
+        "auto.offset.reset": os.getenv("EVENT_HUB_AUTO_OFFSET_RESET", "earliest"),
         "enable.auto.commit": False,
     }
 
-
-    # --------------------------------------------------------
-    # 3. Create Event Hubs consumer
-    # --------------------------------------------------------
-
     consumer = Consumer(consumer_config)
-
-
-    # --------------------------------------------------------
-    # 4. Connect to ADLS Gen2
-    # --------------------------------------------------------
 
     service_client = (
         DataLakeServiceClient.from_connection_string(
@@ -168,66 +149,38 @@ def main():
         )
     )
 
-
-    # --------------------------------------------------------
-    # 5. Subscribe to Event Hubs
-    # --------------------------------------------------------
-
     consumer.subscribe([EVENT_HUB_NAME])
 
-
-    # --------------------------------------------------------
-    # 6. Create counters and duplicate tracking
-    # --------------------------------------------------------
-
+    latest_event_time_by_partition = {}
     processed_event_ids = set()
 
     raw_count = 0
     accepted_count = 0
     duplicate_count = 0
     quarantine_count = 0
-
+    late_count = 0
 
     print()
     print("================================================")
     print("HEALTHCARE CDC EVENT CONSUMER")
     print("================================================")
-    print(
-        f"Event Hub : {EVENT_HUB_NAME}"
-    )
-    print(
-        f"Filesystem: {FILESYSTEM}"
-    )
-    print("Consumer group: healthcare-bronze-consumer-v1")
+    print(f"Event Hub : {EVENT_HUB_NAME}")
+    print(f"Filesystem: {FILESYSTEM}")
+    print(f"Consumer group: {consumer_config['group.id']}")
     print("================================================")
     print()
 
-
     try:
-
-        # ----------------------------------------------------
-        # 7. Continuously poll Event Hubs
-        # ----------------------------------------------------
 
         while True:
 
             message = consumer.poll(5.0)
 
-
-            # ------------------------------------------------
-            # No new messages
-            # ------------------------------------------------
-
             if message is None:
 
-                print("No new messages. Consumer stopping.")
+                print("No new messages. Waiting...")
 
-                break
-
-
-            # ------------------------------------------------
-            # Event Hubs / Kafka error
-            # ------------------------------------------------
+                continue
 
             if message.error():
 
@@ -237,16 +190,10 @@ def main():
 
                 continue
 
-
-            # ------------------------------------------------
-            # 8. Read the message payload
-            # ------------------------------------------------
-
             raw_payload = message.value()
 
-
             # ------------------------------------------------
-            # 9. Parse JSON
+            # Parse JSON
             # ------------------------------------------------
 
             try:
@@ -289,9 +236,10 @@ def main():
 
                 continue
 
-
             # ------------------------------------------------
-            # 10. Write the received event to RAW
+            # Write every successfully parsed message to RAW.
+            #
+            # RAW preserves what arrived from Event Hubs.
             # ------------------------------------------------
 
             raw_count += 1
@@ -300,7 +248,6 @@ def main():
                 timezone.utc
             ).strftime("%Y-%m-%d")
 
-
             raw_path = (
                 f"{RAW_PREFIX}/"
                 f"ingestion_date={ingestion_date}/"
@@ -308,21 +255,12 @@ def main():
                 f"offset={message.offset()}.json"
             )
 
-
             raw_record = {
                 "event": event,
-
-                "event_hub_partition": (
-                    message.partition()
-                ),
-
-                "event_hub_offset": (
-                    message.offset()
-                ),
-
+                "event_hub_partition": message.partition(),
+                "event_hub_offset": message.offset(),
                 "received_at": utc_now(),
             }
-
 
             upload_json(
                 file_system_client,
@@ -330,33 +268,26 @@ def main():
                 raw_record
             )
 
-
             print(
-                f"RAW WRITTEN: {event.get('event_id')}"
+                f"RAW WRITTEN: "
+                f"{event.get('event_id', 'unknown')}"
             )
 
-
             # ------------------------------------------------
-            # 11. Validate the event
+            # Validate envelope + payload
             # ------------------------------------------------
 
             is_valid, reason = validate_event(event)
-
 
             if not is_valid:
 
                 quarantine = {
                     "event": event,
-
                     "received_at": utc_now(),
-
                     "partition": message.partition(),
-
                     "offset": message.offset(),
-
                     "reason": reason,
                 }
-
 
                 quarantine_path = (
                     f"{QUARANTINE_PREFIX}/"
@@ -366,23 +297,19 @@ def main():
                     f"{message.offset()}.json"
                 )
 
-
                 upload_json(
                     file_system_client,
                     quarantine_path,
                     quarantine
                 )
 
-
                 quarantine_count += 1
-
 
                 print(
                     f"QUARANTINED: "
                     f"{event.get('event_id', 'unknown')} "
                     f"| reason={reason}"
                 )
-
 
                 consumer.commit(
                     message=message,
@@ -391,13 +318,15 @@ def main():
 
                 continue
 
-
             # ------------------------------------------------
-            # 12. Detect duplicate event IDs
+            # Duplicate detection
+            #
+            # Check duplicates before late-arrival detection so
+            # a repeated event is counted as a duplicate rather
+            # than being counted again as a late event.
             # ------------------------------------------------
 
             event_id = event["event_id"]
-
 
             if event_id in processed_event_ids:
 
@@ -407,7 +336,6 @@ def main():
                     f"DUPLICATE SKIPPED: {event_id}"
                 )
 
-
                 consumer.commit(
                     message=message,
                     asynchronous=False
@@ -415,24 +343,47 @@ def main():
 
                 continue
 
-
-            # ------------------------------------------------
-            # 13. Remember this event ID
-            # ------------------------------------------------
-
             processed_event_ids.add(event_id)
 
+            # ------------------------------------------------
+            # Detect late arrival
+            #
+            # Event-time ordering is evaluated independently
+            # for each Event Hubs partition.
+            #
+            # An event is considered late when its event_time
+            # is earlier than the latest event_time already
+            # processed on the same partition.
+            # ------------------------------------------------
+
+            event_time = event["event_time"]
+            partition = message.partition()
+
+            if partition in latest_event_time_by_partition:
+
+                if event_time < latest_event_time_by_partition[partition]:
+
+                    late_count += 1
+
+                    print(
+                        f"LATE EVENT: "
+                        f"{event_id} "
+                        f"| event_time={event_time} "
+                        f"| partition={partition}"
+                    )
+
+            if (
+                partition not in latest_event_time_by_partition
+                or event_time > latest_event_time_by_partition[partition]
+            ):
+
+                latest_event_time_by_partition[partition] = event_time
 
             # ------------------------------------------------
-            # 14. Add Bronze processing timestamp
+            # Add platform processing timestamp
             # ------------------------------------------------
 
             event["processed_time"] = utc_now()
-
-
-            # ------------------------------------------------
-            # 15. Write valid unique event to BRONZE
-            # ------------------------------------------------
 
             bronze_path = (
                 f"{BRONZE_PREFIX}/"
@@ -440,73 +391,48 @@ def main():
                 f"{event_id}.json"
             )
 
-
             upload_json(
                 file_system_client,
                 bronze_path,
                 event
             )
 
-
             accepted_count += 1
-
 
             print(
                 f"BRONZE ACCEPTED: {event_id}"
             )
-
-
-            # ------------------------------------------------
-            # 16. Commit the Event Hubs offset
-            # ------------------------------------------------
 
             consumer.commit(
                 message=message,
                 asynchronous=False
             )
 
-
     finally:
 
-        # ----------------------------------------------------
-        # 17. Close the consumer
-        # ----------------------------------------------------
-
         consumer.close()
-
-
-        # ----------------------------------------------------
-        # 18. Print final summary
-        # ----------------------------------------------------
 
         print()
         print("================================================")
         print("CONSUMER SUMMARY")
         print("================================================")
-        print(
-            f"RAW messages       : {raw_count}"
-        )
-        print(
-            f"Bronze accepted    : {accepted_count}"
-        )
-        print(
-            f"Duplicates skipped : {duplicate_count}"
-        )
-        print(
-            f"Quarantined        : {quarantine_count}"
-        )
+        print(f"RAW messages       : {raw_count}")
+        print(f"Bronze accepted    : {accepted_count}")
+        print(f"Duplicates skipped : {duplicate_count}")
+        print(f"Quarantined        : {quarantine_count}")
+        print(f"Late events        : {late_count}")
         print("================================================")
 
-
-# ============================================================
-# PROGRAM ENTRY POINT
-# ============================================================
 
 if __name__ == "__main__":
 
     try:
-
         main()
+
+    except KeyboardInterrupt:
+
+        print()
+        print("Consumer stopped by user.")
 
     except Exception as exc:
 

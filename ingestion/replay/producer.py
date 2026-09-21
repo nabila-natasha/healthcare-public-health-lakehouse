@@ -1,4 +1,4 @@
-import csv
+import hashlib
 import json
 import os
 import sys
@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from confluent_kafka import Producer
 
 
-FIXTURE_PATH = "data/fixtures/healthcare_cdc.csv"
+FIXTURE_PATH = "data/fixtures/cdc_sample_1000.json"
 
 
 def get_required_env(name: str) -> str:
@@ -26,6 +26,42 @@ def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def create_event_id(row: dict) -> str:
+    """
+    Create a deterministic event ID from the CDC business key.
+
+    The same CDC record will always produce the same event_id.
+    This allows downstream duplicate detection.
+    """
+
+    natural_key = "|".join(
+        [
+            row["state"],
+            row["start_date"],
+            row["end_date"],
+        ]
+    )
+
+    return hashlib.sha256(
+        natural_key.encode("utf-8")
+    ).hexdigest()
+
+
+def build_event(row: dict) -> dict:
+    """
+    Wrap the original CDC record in a streaming event envelope.
+    """
+
+    return {
+        "event_id": create_event_id(row),
+        "event_time": row["date_updated"],
+        "ingestion_time": utc_now(),
+        "source": "cdc_historical_replay",
+        "source_dataset_id": "pwn4-m3yp",
+        "payload": row,
+    }
+
+
 def delivery_report(err, msg):
     if err is not None:
         print(f"DELIVERY FAILED: {err}")
@@ -38,7 +74,27 @@ def delivery_report(err, msg):
         )
 
 
+def publish_event(producer, event_hub_name, event):
+    payload = json.dumps(event).encode("utf-8")
+
+    producer.produce(
+        topic=event_hub_name,
+        key=event["event_id"].encode("utf-8"),
+        value=payload,
+        callback=delivery_report,
+    )
+
+    producer.poll(0)
+
+    print(
+        f"SENT "
+        f"{event['event_id']} "
+        f"| event_time={event.get('event_time', '<missing>')}"
+    )
+
+
 def main():
+
     connection_string = get_required_env(
         "EVENT_HUB_CONNECTION_STRING"
     )
@@ -63,74 +119,143 @@ def main():
 
     producer = Producer(config)
 
-    sent_count = 0
-
     with open(
         FIXTURE_PATH,
-        newline="",
         encoding="utf-8",
     ) as file:
 
-        reader = csv.DictReader(file)
+        rows = json.load(file)
 
-        for row in reader:
+    print()
+    print("================================================")
+    print("CDC HISTORICAL REPLAY PRODUCER")
+    print("================================================")
+    print(f"Source records : {len(rows)}")
+    print(f"Event Hub      : {event_hub_name}")
+    print("================================================")
+    print()
 
-            event = {
-                "event_id": row["event_id"],
-                "event_time": row["event_time"],
-                "ingestion_time": utc_now(),
-                "source": "cdc_replay",
-                "patient_id": row["patient_id"],
-                "event_type": row["event_type"],
-                "region": row["region"],
-                "status": row["status"],
-            }
+    sent_count = 0
 
-            payload = json.dumps(event).encode("utf-8")
+    # --------------------------------------------------------
+    # Publish records in chronological order.
+    #
+    # One record is intentionally held back so we can replay
+    # it later as a late-arriving event.
+    # --------------------------------------------------------
 
-            producer.produce(
-                topic=event_hub_name,
-                key=event["event_id"].encode("utf-8"),
-                value=payload,
-                callback=delivery_report,
-            )
+    late_row = rows[5]
 
-            producer.poll(0)
+    ordered_rows = rows[:5] + rows[6:]
 
-            sent_count += 1
+    for row in ordered_rows:
 
-            print(f"SENT {event['event_id']}")
+        event = build_event(row)
 
-            time.sleep(0.5)
+        publish_event(
+            producer,
+            event_hub_name,
+            event,
+        )
 
-            # Intentionally replay one event to test
-            # duplicate detection in the downstream consumer.
-            if event["event_id"] == "cdc-0005":
+        sent_count += 1
 
-                producer.produce(
-                    topic=event_hub_name,
-                    key=event["event_id"].encode("utf-8"),
-                    value=payload,
-                    callback=delivery_report,
-                )
+        time.sleep(0.05)
 
-                producer.poll(0)
+    # --------------------------------------------------------
+    # Controlled late-arriving event
+    # --------------------------------------------------------
 
-                sent_count += 1
+    late_event = build_event(late_row)
 
-                print("SENT DUPLICATE cdc-0005")
+    print()
+    print(
+        "SENDING LATE EVENT: "
+        f"{late_event['event_id']} "
+        f"| event_time={late_event['event_time']}"
+    )
 
-                time.sleep(0.5)
+    publish_event(
+        producer,
+        event_hub_name,
+        late_event,
+    )
+
+    sent_count += 1
+
+    # --------------------------------------------------------
+    # Controlled duplicate
+    #
+    # Same event_id and same payload are intentionally sent
+    # twice so the consumer can demonstrate deduplication.
+    # --------------------------------------------------------
+
+    print()
+    print(
+        "SENDING DUPLICATE: "
+        f"{late_event['event_id']}"
+    )
+
+    publish_event(
+        producer,
+        event_hub_name,
+        late_event,
+    )
+
+    sent_count += 1
+
+    # --------------------------------------------------------
+    # Controlled malformed event
+    #
+    # Remove event_time so the consumer must quarantine it.
+    # --------------------------------------------------------
+
+    malformed_event = build_event(rows[10])
+
+    # Give the fault-injected event its own ID so it is treated
+    # as a distinct malformed message rather than a duplicate.
+    malformed_event["event_id"] = (
+        malformed_event["event_id"] + "-malformed"
+    )
+
+    del malformed_event["event_time"]
+
+    print()
+    print(
+        "SENDING MALFORMED EVENT: "
+        f"{malformed_event['event_id']}"
+    )
+
+    publish_event(
+        producer,
+        event_hub_name,
+        malformed_event,
+    )
+
+    sent_count += 1
 
     producer.flush()
 
     print()
-    print(f"Producer complete. Events sent: {sent_count}")
+    print("================================================")
+    print("PRODUCER COMPLETE")
+    print("================================================")
+    print(f"Events sent: {sent_count}")
+    print("Includes:")
+    print("  - historical CDC replay")
+    print("  - late-arriving event")
+    print("  - duplicate event")
+    print("  - malformed event")
+    print("================================================")
 
 
 if __name__ == "__main__":
+
     try:
         main()
+
     except Exception as exc:
+
         print(f"ERROR: {exc}")
+
         sys.exit(1)
