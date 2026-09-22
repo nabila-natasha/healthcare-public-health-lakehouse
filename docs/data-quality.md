@@ -1,420 +1,823 @@
-# Data Quality
+# Data Quality Framework
 
-## Quality objectives
+## Purpose
 
-The pipeline applies data-quality controls across the Bronze, Silver, and Gold layers.
+Data quality is treated as an engineering control throughout the healthcare public-health lakehouse rather than as a final dashboard check.
 
-The main objectives are to:
+The project applies validation at multiple stages:
 
-* preserve source records without silent loss
-* detect malformed and structurally invalid events
-* identify duplicate event deliveries
-* validate required fields and data types
-* preserve event time separately from ingestion time
-* reconcile records between transformation layers
-* validate analytical grain before Gold consumption
-* isolate invalid records in quarantine rather than silently discarding them
+```text
+Source
+  │
+  ▼
+RAW
+  │
+  ▼
+Bronze
+  │
+  ├── schema / completeness / malformed-record checks
+  │
+  ▼
+Silver
+  │
+  ├── typing / validity / uniqueness / required fields
+  │
+  ▼
+Gold
+  │
+  ├── grain / reconciliation / aggregation checks
+  │
+  ▼
+Analytics / ML
+```
 
-Validation is designed to distinguish between:
-
-* **ingestion quality** — whether an event can be safely accepted
-* **transformation quality** — whether records can be converted into typed analytical datasets
-* **analytical quality** — whether Gold metrics reconcile to their source data
+The controls are designed to detect data loss, duplication, malformed records, invalid values, and transformation inconsistencies.
 
 ---
 
-## Bronze validation
+# 1. Data Quality Principles
 
-Bronze is the first durable analytical landing layer after ingestion.
+The project follows these principles:
 
-### CDC streaming validation
-
-CDC records are replayed through Azure Event Hubs using a streaming architecture. Each event contains an envelope with:
-
-* `event_id`
-* `event_time`
-* `ingestion_time`
-* `source`
-* `source_dataset_id`
-* `payload`
-
-The consumer validates the required event envelope before writing a record to Bronze.
-
-Checks include:
-
-* required event fields are present
-* `event_time` is present
-* `ingestion_time` is generated during ingestion
-* payload structure is preserved
-* malformed events are routed to quarantine
-* duplicate event deliveries are detected using `event_id`
-
-The deterministic `event_id` is generated from the CDC business-record identity:
-
-```text
-state | start_date | end_date
-```
-
-This allows duplicate delivery to be identified independently of the Event Hubs offset.
-
-### Late-event handling
-
-The streaming consumer also compares event time with previously observed event time within each Event Hubs partition.
-
-Late events are **detected and logged operationally** but are not persisted as a separate Bronze status field.
-
-This distinction is intentional:
-
-* `event_time` represents when the source record was updated
-* `ingestion_time` represents when the pipeline received the event
-* Event Hubs offsets represent stream position
-* a late event can therefore have an older `event_time` while arriving later in the stream
-
-### Day 4 validation evidence
-
-The final Day 4 replay contained:
-
-* 1,002 Event Hubs messages
-* 1,002 RAW files
-* 1,000 valid Bronze records
-* 1 quarantined malformed event
-
-The malformed event was intentionally created without `event_time` and was routed to quarantine.
-
-The final ADLS layout was:
-
-```text
-healthcare/
-├── raw/
-│   └── cdc/day4_final_20260921/
-├── bronze/
-│   └── cdc/day4_final_20260921/
-└── quarantine/
-    └── cdc/day4_final_20260921/
-```
-
-The difference between RAW and Bronze is explained by duplicate and malformed-event handling rather than silent record loss.
+1. Validate as early as practical.
+2. Do not silently discard malformed records.
+3. Preserve source lineage.
+4. Use deterministic identifiers where possible.
+5. Validate uniqueness at the correct grain.
+6. Reconcile records across transformation boundaries.
+7. Separate hard validation failures from informational diagnostics.
+8. Keep Bronze available for investigation and replay.
+9. Use controlled fixtures for repeatable tests.
+10. Do not claim successful validation without evidence.
 
 ---
 
-## Batch Bronze validation
+# 2. RAW Layer
 
-The openFDA ingestion pipeline uses Azure Data Factory to copy the source API response into ADLS RAW.
+RAW preserves the source representation as received.
 
-The openFDA Bronze processing validates:
+Controls include:
 
-* expected source structure
+* successful source retrieval
+* expected file existence
+* file-size sanity checks
+* source response validation
+* preservation of the original structure
+
+RAW is not treated as fully trusted analytical data.
+
+It provides the replay and lineage boundary for downstream processing.
+
+---
+
+# 3. Bronze Layer
+
+Bronze focuses on ingestion integrity.
+
+## 3.1 CDC Bronze
+
+The Day 4 CDC streaming pipeline validates:
+
+* required event fields
+* event identity
+* event timestamp
+* ingestion timestamp
+* source metadata
+* malformed event handling
+* duplicate delivery detection
+
+The event envelope contains:
+
+```text
+event_id
+event_time
+ingestion_time
+source
+source_dataset_id
+payload
+```
+
+A deliberately malformed event missing `event_time` was routed to quarantine.
+
+Final Day 4 validation:
+
+```text
+RAW files        : 1002
+Bronze files     : 1000
+Quarantine files : 1
+```
+
+This demonstrates that malformed input was not allowed to enter Bronze as a normal analytical record.
+
+---
+
+## 3.2 openFDA Bronze
+
+The Day 3 batch pipeline validates:
+
+* successful REST retrieval
+* expected source response structure
 * presence of adverse-event records
-* unique `safetyreportid`
-* extraction of nested reaction and drug structures
-* preservation of source information
+* required `safetyreportid`
+* duplicate report IDs
+* successful Bronze CSV creation
 
-The Day 3 controlled ingestion produced 100 source adverse-event records for transformation.
+The Bronze transformation preserves selected nested reaction and drug structures as JSON strings.
 
 ---
 
-## Silver validation
+# 4. Silver Layer
 
-Silver contains typed and normalized datasets suitable for analytical processing.
+Silver is the primary data-standardization layer.
 
-### CDC Silver
+Controls include:
 
-The CDC Bronze-to-Silver transformation:
-
-```text
-transformations/silver/cdc_bronze_to_silver.py
-```
-
-performs:
-
-* recursive Bronze JSON discovery
-* event-envelope flattening
-* payload extraction
-* timestamp conversion
-* date conversion
+* schema validation
+* required-field validation
+* timestamp parsing
+* date parsing
 * numeric type conversion
-* required-column validation
-* duplicate detection by `event_id`
-* Parquet output
-
-The CDC Silver dataset contains 1,000 records across 60 state/geographic reporting entities.
-
-Validation checks include:
-
-* 1,000 expected records
-* 60 states
-* zero duplicate event IDs
-* required fields populated
-* expected timestamp/date types
-* expected numeric fields available
-
-### openFDA Silver
-
-The openFDA Bronze-to-Silver transformation:
-
-```text
-transformations/silver/openfda_bronze_to_silver.py
-```
-
-normalizes the nested source structure into three datasets:
-
-```text
-adverse_events
-adverse_event_reactions
-adverse_event_drugs
-```
-
-This preserves the one-to-many relationships between an adverse-event report and its associated reactions and drugs.
-
-Validation results for the controlled dataset:
-
-* 100 adverse-event records
-* 247 reaction records
-* 265 drug records
-* zero duplicate report IDs
-
-The Silver outputs are stored as Parquet to provide typed, columnar datasets for downstream analytical processing.
+* duplicate detection
+* source lineage preservation
+* structured nested-data processing
 
 ---
 
-## Gold validation
+# 5. CDC Silver Controls
 
-Gold contains business-level analytical datasets at explicitly defined grains.
-
-### CDC Gold
-
-The CDC Silver-to-Gold transformation:
+The CDC Bronze → Silver transformation produces 15 columns:
 
 ```text
-transformations/gold/cdc_silver_to_gold.py
+event_id
+event_time
+ingestion_time
+processed_time
+source
+source_dataset_id
+state
+start_date
+end_date
+tot_cases
+new_cases
+tot_deaths
+new_deaths
+new_historic_cases
+new_historic_deaths
 ```
 
-aggregates records at:
+## 5.1 Required Fields
+
+The following fields must be present:
 
 ```text
-state + start_date + end_date
+event_id
+event_time
+ingestion_time
+source
+source_dataset_id
+state
+start_date
+end_date
 ```
 
-The Gold dataset contains:
-
-* `state`
-* `start_date`
-* `end_date`
-* `total_cases`
-* `new_cases`
-* `total_deaths`
-* `new_deaths`
-* `historic_cases`
-* `historic_deaths`
-* `source_event_count`
-* `cumulative_death_case_ratio_pct`
-
-The derived metric:
-
-```text
-cumulative_death_case_ratio_pct =
-    total_deaths / total_cases * 100
-```
-
-is a portfolio-derived analytical metric. It is **not represented as an official CDC published measure**.
-
-Where `total_cases` is zero, the ratio remains undefined rather than forcing an artificial zero value.
-
-CDC Gold validation checks include:
-
-* 1,000 expected rows
-* 60 states
-* zero duplicate Gold grain
-* required fields populated
-* Gold source-event count reconciles to Silver records
-
-### openFDA Gold
-
-The openFDA Silver-to-Gold transformation:
-
-```text
-transformations/gold/openfda_silver_to_gold.py
-```
-
-aggregates reports at:
-
-```text
-reporter_country + transmission_date
-```
-
-Gold metrics include:
-
-* adverse-event report count
-* serious-report count
-* death-report count
-* expedited-report count
-* corresponding percentages
-
-Validation checks include:
-
-* expected Gold row count
-* country coverage
-* zero duplicate analytical grain
-* required fields populated
-* Gold report counts reconcile to Silver report IDs
-
-The 100 Silver adverse-event records producing 15 Gold rows is expected because Gold uses an aggregate business grain rather than one row per source report.
+Records failing required-field validation are not accepted as valid Silver records.
 
 ---
 
-## Reconciliation
+## 5.2 Numeric Validity
 
-Cross-layer reconciliation is used to detect unexpected record loss or duplication during transformation.
+CDC numeric measures are converted from their Bronze string representation into numeric values.
+
+Examples:
+
+```text
+tot_cases
+new_cases
+tot_deaths
+new_deaths
+new_historic_cases
+new_historic_deaths
+```
+
+The transformation uses numeric parsing rather than treating these fields as free-form text.
+
+---
+
+## 5.3 Timestamp Validity
+
+The transformation parses:
+
+```text
+event_time
+ingestion_time
+processed_time
+```
+
+as timestamps.
+
+This supports downstream time-based analysis and preserves the distinction between source event time and platform processing time.
+
+---
+
+## 5.4 Deduplication
+
+CDC records use:
+
+```text
+event_id
+```
+
+as the deterministic identity.
+
+Final Day 5 validation:
+
+```text
+CDC Silver rows      : 1000
+Duplicate event IDs  : 0
+```
+
+Result:
+
+```text
+CDC Silver: PASS
+```
+
+---
+
+# 6. openFDA Silver Controls
+
+The openFDA Silver layer validates the report-level identity:
+
+```text
+safetyreportid
+```
+
+Final Day 5 validation:
+
+```text
+Adverse events       : 100
+Reaction records     : 247
+Drug records         : 265
+Duplicate report IDs : 0
+```
+
+The nested reaction and drug structures are processed from:
+
+```text
+reactions_json
+drugs_json
+```
+
+The reaction and drug counts can exceed the number of adverse-event reports because one report can contain multiple reaction and drug records.
+
+---
+
+# 7. Gold Layer
+
+Gold validation focuses on analytical usability.
+
+Controls include:
+
+* expected output existence
+* expected schema
+* correct analytical grain
+* duplicate-grain detection
+* source reconciliation
+* aggregation consistency
+
+Gold is not expected to have the same row count as Silver because Gold can contain aggregated records.
+
+---
+
+# 8. CDC Gold Controls
+
+Final validation:
+
+```text
+Rows             : 1000
+Columns          : 11
+States           : 60
+Duplicate grain  : 0
+```
+
+CDC reconciliation:
+
+```text
+Silver source events : 1000
+Gold source events   : 1000
+```
+
+Result:
+
+```text
+CDC reconciliation: PASS
+CDC Gold: PASS
+```
+
+---
+
+# 9. openFDA Gold Controls
+
+Final validation:
+
+```text
+Rows             : 15
+Columns          : 9
+Countries        : 11
+Duplicate grain  : 0
+```
+
+The smaller row count is expected because Gold represents an aggregated analytical view of the 100 report-level Silver records.
+
+openFDA reconciliation:
+
+```text
+Silver report IDs : 100
+Gold report count : 100
+```
+
+Result:
+
+```text
+openFDA reconciliation: PASS
+openFDA Gold: PASS
+```
+
+---
+
+# 10. Reconciliation Controls
+
+Reconciliation is used to detect silent record loss or unexpected duplication between processing layers.
+
+## CDC
+
+```text
+Silver source events : 1000
+Gold source events   : 1000
+
+Result: PASS
+```
+
+## openFDA
+
+```text
+Silver report IDs : 100
+Gold report count : 100
+
+Result: PASS
+```
+
+Reconciliation therefore confirms that the validated source-level records remained represented in the Gold outputs.
+
+---
+
+# 11. Duplicate Handling
+
+Duplicate handling occurs at the appropriate dataset grain.
 
 ### CDC
 
 ```text
-Silver source events: 1,000
-Gold source events:   1,000
-Result: PASS
+event_id
 ```
 
-The sum of `source_event_count` in CDC Gold equals the number of valid CDC Silver records.
+is the deterministic event identity.
 
 ### openFDA
 
 ```text
-Silver report IDs: 100
-Gold report count: 100
-Result: PASS
+safetyreportid
 ```
 
-The total Gold adverse-event report count equals the number of unique Silver report IDs.
+is the report-level identity.
 
-These reconciliations provide evidence that aggregation changed the analytical grain without unexpectedly dropping source records.
+### Gold
+
+Gold datasets use their defined analytical grain rather than assuming that source IDs remain unique after aggregation.
+
+This distinction is important because uniqueness must always be evaluated relative to the intended grain.
 
 ---
 
-## Quarantine
+# 12. Event Time and Ingestion Time
 
-Records failing structural validation are stored separately rather than silently discarded.
+The CDC streaming pipeline preserves both:
 
-For the Day 4 CDC streaming test, the deliberately malformed event was quarantined because:
+```text
+event_time
+ingestion_time
+```
+
+These fields have different meanings.
+
+```text
+event_time
+    = source/update time carried by the event
+
+ingestion_time
+    = time the platform received the event
+```
+
+Because Day 4 replays historical CDC data, the two timestamps can differ by years.
+
+This is intentional and allows the architecture to demonstrate event-time-aware processing.
+
+Late events are detected in the Day 4 consumer using partition-aware event-time comparison.
+
+The current Day 4 implementation logs late-event detection but does not persist a separate late-event status column in Bronze.
+
+---
+
+# 13. Quarantine
+
+Invalid events are not silently dropped.
+
+The Day 4 streaming consumer routes malformed events to:
+
+```text
+healthcare/quarantine/cdc/
+```
+
+The final validation contained:
+
+```text
+1
+```
+
+quarantined malformed event.
+
+The recorded reason was:
 
 ```text
 Missing event fields: event_time
 ```
 
-The quarantine path was:
-
-```text
-healthcare/quarantine/cdc/day4_final_20260921/
-```
-
-Quarantine therefore provides an auditable location for rejected events and supports later investigation without contaminating the Bronze analytical dataset.
+Quarantine provides an operational path for investigating and replaying invalid input without contaminating the trusted Bronze layer.
 
 ---
 
-## Testing strategy
+# 14. Hard Validation vs Diagnostic Checks
 
-The repository separates **CI-safe tests** from **cloud/data validation**.
+The project distinguishes between hard validation failures and diagnostic observations.
 
-### Automated repository tests
+## Hard Validation
 
-The `tests/` directory contains deterministic tests that can run without Azure credentials, external APIs, or an active Azure subscription.
+A condition that prevents a record or dataset from being accepted.
 
-The current Day 5 structural test validates:
+Examples:
 
-* required transformation scripts exist
-* the Silver/Gold validation script exists
-* expected Medallion transformation directories exist
-* Day 5 documentation exists
+* missing required event identity
+* missing required timestamp
+* malformed event envelope
+* missing required report ID
+* duplicate identity where uniqueness is mandatory
+* missing expected output
 
-These tests are suitable for GitHub Actions CI.
+## Diagnostic / Informational Validation
 
-### Data validation scripts
+A condition that should be observed and investigated but should not automatically invalidate the dataset without domain justification.
 
-The script:
+Examples:
+
+* unusual statistical distributions
+* historical reporting revisions
+* changes in source reporting patterns
+* statistical outliers
+
+This distinction avoids embedding unsupported business assumptions into the data pipeline.
+
+---
+
+# 15. CDC Domain Considerations
+
+CDC aggregate data can be retrospectively updated by the source.
+
+Therefore, simple rules such as:
+
+```text
+new_cases <= total_cases
+```
+
+should not automatically be treated as hard data-quality failures without confirming the source's reporting semantics.
+
+Historical corrections and reporting revisions can affect aggregate relationships.
+
+The pipeline therefore emphasizes:
+
+* structural validity
+* typing
+* identity
+* completeness
+* reconciliation
+
+rather than imposing unsupported domain constraints.
+
+---
+
+# 16. Idempotency
+
+The transformation layer is designed for repeatable processing.
+
+CDC uses:
+
+```text
+event_id
+```
+
+as the deterministic event identity.
+
+openFDA uses:
+
+```text
+safetyreportid
+```
+
+as the report-level identity.
+
+These identifiers allow duplicate detection during repeated processing.
+
+The intended operational property is:
+
+```text
+same Bronze input
+        │
+        ▼
+same transformation
+        │
+        ▼
+same Silver/Gold logical result
+```
+
+rather than accumulating duplicate analytical records on every execution.
+
+---
+
+# 17. Storage Format
+
+The project uses different formats at different stages:
+
+```text
+CDC Bronze     → JSON
+openFDA Bronze → CSV
+
+CDC Silver     → Parquet
+openFDA Silver → Parquet
+
+CDC Gold       → Parquet
+openFDA Gold   → Parquet
+```
+
+Parquet is used for Silver and Gold because it provides:
+
+* typed columns
+* columnar storage
+* compression
+* efficient analytical reads
+* compatibility with Spark
+* compatibility with downstream Azure analytics services
+* a clean boundary between ingestion-oriented Bronze data and analytical datasets
+
+---
+
+# 18. Compute and Storage Separation
+
+The transformation architecture intentionally distinguishes compute from storage.
+
+```text
+ADLS Gen2 = storage
+Python    = transformation compute
+Parquet   = analytical storage format
+```
+
+The transformation logic does not execute "inside ADLS."
+
+Instead:
+
+```text
+ADLS Bronze
+     │
+     ▼
+Python transformation
+     │
+     ▼
+ADLS Silver
+     │
+     ▼
+Python transformation
+     │
+     ▼
+ADLS Gold
+```
+
+This separation provides a clear architecture boundary and allows the compute technology to evolve independently from the storage layer.
+
+---
+
+# 19. Databricks Boundary
+
+Databricks Free Edition is not used as the primary Day 5 transformation engine.
+
+The project's ADR defines Databricks Free Edition as a separate ML/PySpark execution environment.
+
+The primary Azure data path remains:
+
+```text
+External Sources
+      │
+      ├──────────────┐
+      ▼              ▼
+     ADF        Event Hubs
+      │              │
+      ▼              ▼
+     ADLS ←──── Python Consumer
+      │
+      ▼
+   Bronze
+      │
+      ▼
+   Silver
+      │
+      ▼
+    Gold
+      │
+      ▼
+ ML-ready dataset
+      │
+      ▼
+Databricks Free Edition
+```
+
+A future production implementation could replace the Python transformation layer with Spark/Databricks processing where scale and operational requirements justify it.
+
+---
+
+# 20. Validation Script
+
+The Day 5 validation is implemented in:
 
 ```text
 scripts/silver_gold_validations.py
 ```
 
-validates the actual generated Day 5 Parquet outputs.
+The validation checks:
 
-It checks:
-
-* expected files exist
-* row counts
-* state/country coverage
-* duplicate keys
-* required fields
-* Silver-to-Gold reconciliation
-* expected parent/child record counts
-
-This validation requires generated transformation outputs and is therefore separate from the CI-safe repository tests.
-
-### External dependency isolation
-
-Automated repository tests should not depend on:
-
-* live Azure resources
-* Azure subscription availability
-* Event Hubs
-* Azure Data Factory
-* external APIs
-* Power BI
-* production credentials
-
-This allows CI to remain useful even when the Azure trial environment is unavailable.
+* expected Parquet files exist
+* CDC Silver row count
+* CDC Silver column count
+* CDC state coverage
+* CDC duplicate event IDs
+* CDC Gold row count
+* CDC Gold column count
+* CDC Gold state coverage
+* CDC Gold duplicate grain
+* CDC Silver-to-Gold reconciliation
+* openFDA Silver report count
+* openFDA reaction count
+* openFDA drug count
+* openFDA duplicate report IDs
+* openFDA Gold row count
+* openFDA Gold column count
+* openFDA country coverage
+* openFDA Gold duplicate grain
+* openFDA Silver-to-Gold reconciliation
 
 ---
 
-## Data-quality principles
+# 21. Final Day 5 Validation Evidence
 
-The project follows several practical data-engineering principles.
+The complete validation result was:
 
-### 1. Do not silently discard records
-
-Invalid records are quarantined or explicitly excluded through documented validation logic.
-
-### 2. Preserve source and processing time separately
-
-Event time and ingestion time answer different operational questions and should not be conflated.
-
-### 3. Detect duplicate delivery
-
-Streaming systems provide at-least-once delivery patterns in which the same event can potentially be delivered more than once. Deterministic event IDs provide a basis for duplicate detection.
-
-### 4. Validate analytical grain
-
-Gold datasets explicitly define their grain before aggregation. This reduces the risk of accidental double counting.
-
-### 5. Reconcile transformations
-
-Source-to-target reconciliation provides evidence that aggregation and transformation did not unexpectedly lose records.
-
-### 6. Separate data validation from application testing
-
-Cloud data validation verifies actual datasets and resources, while CI tests verify repository structure and deterministic code behavior without requiring cloud access.
-
----
-
-## Current validation status
-
-The current Day 5 validation completed successfully:
 ```text
+========================================================================
+SILVER / GOLD VALIDATION
+========================================================================
+
+All expected Parquet files found.
+
+===== CDC SILVER =====
+Rows: 1000
+Columns: 15
+States: 60
+Duplicate event IDs: 0
 CDC Silver: PASS
-CDC Gold: PASS
+
+===== CDC GOLD =====
+Rows: 1000
+Columns: 11
+States: 60
+Duplicate grain: 0
+
+===== CDC RECONCILIATION =====
+Silver source events: 1000
+Gold source events: 1000
 CDC reconciliation: PASS
+CDC Gold: PASS
 
+===== OPENFDA SILVER =====
+Adverse events: 100
+Reaction records: 247
+Drug records: 265
+Duplicate report IDs: 0
 openFDA Silver: PASS
-openFDA Gold: PASS
-openFDA reconciliation: PASS
 
-Overall Silver / Gold validation: PASS
+===== OPENFDA GOLD =====
+Rows: 15
+Columns: 9
+Countries: 11
+Duplicate grain: 0
+
+===== OPENFDA RECONCILIATION =====
+Silver report IDs: 100
+Gold report count: 100
+openFDA reconciliation: PASS
+openFDA Gold: PASS
+
+========================================================================
+SILVER / GOLD VALIDATION: PASS
+========================================================================
 ```
 
-The repository test suite also completed successfully:
+---
+
+# 22. Test Strategy
+
+The project uses controlled datasets and repeatable validation where practical.
+
+This provides:
+
+* deterministic test inputs
+* repeatable validation
+* reduced dependency on external API availability
+* safer development
+* easier CI/CD testing
+
+Live Azure resources are validated separately when the objective is to demonstrate Azure integration.
+
+The project does not treat successful connectivity to an external service as proof of data quality.
+
+---
+
+# 23. Current Limitations
+
+The current portfolio implementation intentionally does not claim production-grade enterprise monitoring.
+
+Current limitations include:
+
+* late-event status is logged by the CDC consumer but is not persisted as a separate Bronze field
+* transformation orchestration is not yet fully automated
+* validation results are currently command-line evidence rather than a centralized monitoring store
+* no enterprise data-quality platform is used
+* no production alerting framework is implemented
+* CDC is historical data replayed through a streaming architecture rather than a live CDC source
+
+These limitations are documented deliberately rather than hidden.
+
+---
+
+# 24. Future Improvements
+
+A production implementation could add:
+
+* automated transformation scheduling
+* centralized data-quality result tables
+* pipeline failure alerting
+* data-quality dashboards
+* schema drift detection
+* data contracts
+* automated quarantine reprocessing
+* historical quality trend monitoring
+* Spark-based distributed transformations where scale requires it
+* CI/CD execution of transformation and validation tests
+
+---
+
+# 25. Day 5 Quality Outcome
+
+The Day 5 medallion processing layer passed all implemented Silver/Gold validation controls.
+
+Key evidence:
 
 ```text
-4 passed
+CDC Silver:
+1000 rows
+0 duplicate event IDs
+
+CDC Gold:
+0 duplicate grain
+1000 source events reconciled
+
+openFDA Silver:
+100 adverse-event reports
+247 reaction records
+265 drug records
+0 duplicate report IDs
+
+openFDA Gold:
+0 duplicate grain
+100 report IDs reconciled
+
+Overall:
+SILVER / GOLD VALIDATION: PASS
 ```
 
-These checks provide validation evidence for the current controlled datasets while keeping the CI
-pipeline independent of live Azure resources.
+The lakehouse now has a validated Bronze → Silver → Gold processing path ready for the downstream Synapse, Power BI, and ML stages.
