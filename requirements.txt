@@ -1,3 +1,6 @@
 confluent-kafka
 azure-storage-blob
 azure-storage-file-datalake
+pandas==3.0.6
+pyarrow==25.0.1
+pytest
