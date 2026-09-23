@@ -1,187 +1,97 @@
-# Day 6 — OpenFDA Analytics & Machine Learning
+# Day 6 — OpenFDA Analytics and Machine Learning
 
 ## 1. Objective
 
-Day 6 extends the healthcare/public-health lakehouse from batch and streaming data engineering into analytical machine learning.
+Day 6 extends the healthcare/public-health lakehouse from analytical Gold data into a machine-learning workflow using historical openFDA adverse-event reports.
 
-The primary analytical dataset is the FDA adverse event dataset obtained through the openFDA API.
-
-The objective is to demonstrate an end-to-end machine-learning workflow using a controlled 1,000-report analytical sample:
-
-1. Prepare model-ready features from the OpenFDA Silver layer.
-2. Classify whether an adverse-event report is marked as serious.
-3. Detect unusual reports using unsupervised anomaly detection.
-4. Explain supervised model predictions using SHAP.
-5. Track model experiments and metrics using MLflow.
-6. Publish ML outputs back to the lakehouse for downstream analytics.
-
-This project is intended as a portfolio and engineering demonstration. It is not a clinical decision-support system.
-
----
-
-## 2. Analytical Scope
-
-The project uses a controlled sample of:
-
-* 1,000 CDC surveillance records
-* 1,000 OpenFDA adverse-event reports
-
-The 1,000-record OpenFDA sample is used consistently across the RAW, Bronze, Silver, Gold, and ML layers.
-
-The sample size is intentionally controlled to make the project reproducible and suitable for a time-boxed portfolio implementation.
-
-The project does not claim that the 1,000 records represent the complete openFDA dataset.
-
-The CDC dataset remains primarily focused on streaming/event-engineering and surveillance analytics.
-
-OpenFDA is the primary machine-learning workload.
-
----
-
-## 3. Current Architecture
+The objective is to demonstrate an end-to-end ML analytics vertical slice:
 
 ```text
-                         DATA SOURCES
-                             |
-             +---------------+---------------+
-             |                               |
-             v                               v
-       CDC archived data                openFDA API
-             |                               |
-             |                               v
-             |                       Azure Data Factory
-             |                               |
-             v                               v
-       Azure Event Hubs                 ADLS RAW
-             |                               |
-             v                               v
-       Python Consumer                Python Bronze
-             |                               |
-             v                               v
-        ADLS Bronze                    ADLS Bronze
-             |                               |
-             v                               v
-        CDC Silver                    OpenFDA Silver
-             |                         /      |      \
-             v                        v       v       v
-        CDC Gold                 Events   Reactions  Drugs
-                                       \       |       /
-                                        \      |      /
-                                         v     v     v
-                                      ML Feature
-                                      Engineering
-                                           |
-                                           v
-                                   ADLS ML Features
-                                           |
-                                           v
-                                  Databricks Free Edition
-                                           |
-                         +-----------------+----------------+
-                         |                 |                |
-                         v                 v                v
-                    Baseline           XGBoost       Isolation Forest
-                         |                 |                |
-                         |                 v                |
-                         |               SHAP              |
-                         |                 |                |
-                         +-----------------+----------------+
-                                           |
-                                           v
-                                         MLflow
-                                           |
-                                           v
-                                   ML Prediction /
-                                   Anomaly Outputs
-                                           |
-                                           v
-                                         ADLS
-                                           |
-                                           v
-                                       Synapse
-                                           |
-                                           v
-                                      Power BI
+openFDA
+   ↓
+Azure Data Factory
+   ↓
+ADLS Gen2 RAW
+   ↓
+Bronze
+   ↓
+Silver
+   ↓
+ML feature engineering
+   ↓
+Databricks Free Edition
+   ↓
+XGBoost / Isolation Forest
+   ↓
+ML predictions
+   ↓
+ADLS ML layer
+   ↓
+Synapse Serverless SQL
+   ↓
+Power BI
 ```
+
+The ML workload is intended as a portfolio demonstration of data preparation, leakage control, supervised classification, anomaly detection, model explainability, and downstream analytics serving.
+
+This project does **not** provide clinical decision support, patient-level medical advice, or causal conclusions about drugs and adverse reactions.
 
 ---
 
-## 4. OpenFDA Data Pipeline
+## 2. Dataset Scope
 
-The OpenFDA pipeline follows:
+The controlled Day 6 workload uses 1,000 openFDA adverse-event records.
+
+The data was previously ingested through the Azure lakehouse pipeline:
 
 ```text
-openFDA API
-    |
-    v
-ADF REST ingestion
-    |
-    v
-ADLS RAW
-    |
-    v
-Python Bronze transformation
-    |
-    v
-ADLS Bronze
-    |
-    v
-Python Silver transformation
-    |
-    +-------------------------------+
-    |               |               |
-    v               v               v
-events.parquet  reactions.parquet  drugs.parquet
-    |               |               |
-    +---------------+---------------+
-                    |
-                    v
-             Python ML feature
-                engineering
-                    |
-                    v
-           openfda_ml_features.parquet
+ADF → ADLS RAW → Bronze → Silver
 ```
+
+The Silver layer contains three related Parquet datasets:
+
+```text
+healthcare/silver/openfda/
+├── adverse_events.parquet
+├── adverse_event_reactions.parquet
+└── adverse_event_drugs.parquet
+```
+
+Observed Silver-layer volumes:
+
+| Dataset               | Records |
+| --------------------- | ------: |
+| Adverse-event reports |   1,000 |
+| Reaction records      |   2,749 |
+| Drug records          |   3,079 |
+
+The three datasets are combined at the adverse-event report grain for ML feature engineering.
 
 ---
 
-## 5. Controlled OpenFDA Sample
+## 3. ML Feature Dataset
 
-The current analytical sample contains:
+The ML feature transformation is implemented in:
+
+```text
+transformations/ml/openfda_features.py
+```
+
+The feature dataset is:
+
+```text
+healthcare/ml/openfda/openfda_ml_features.parquet
+```
+
+During development, the controlled feature dataset was also loaded into a Databricks Unity Catalog volume for ML experimentation.
+
+The ML dataset contains:
 
 * 1,000 adverse-event reports
-* 2,749 reaction records
-* 3,079 drug records
+* 13 columns
+* one row per adverse-event report
 
-The OpenFDA Silver layer maintains separate datasets because the source has different logical grains.
-
-### Adverse-event report grain
-
-One row represents one adverse-event report.
-
-### Reaction grain
-
-One row represents one reaction associated with an adverse-event report.
-
-### Drug grain
-
-One row represents one drug associated with an adverse-event report.
-
-The ML feature dataset returns these related datasets to a single report-level grain.
-
----
-
-## 6. ML Feature Dataset
-
-The ML feature dataset is:
-
-```text
-ml/openfda/openfda_ml_features.parquet
-```
-
-It contains one row per `safetyreportid`.
-
-Current columns:
+### Feature columns
 
 ```text
 safetyreportid
@@ -199,376 +109,719 @@ target_serious
 drug_reaction_ratio
 ```
 
----
+### Derived features
 
-## 7. Feature Engineering
+`number_of_reactions` and `number_of_drugs` are aggregated from the Silver reaction and drug child tables.
 
-### 7.1 Patient attributes
-
-The feature dataset retains:
-
-* patient age
-* patient age unit
-* patient sex
-
-Missing values are retained for later preprocessing rather than deleting the entire report.
-
-The current sample contains:
-
-* 341 missing patient-age values
-* 4 missing patient-sex values
-* 7 missing reporter-qualification values
-
-The ML pipeline will handle missing values during model preprocessing.
-
----
-
-## 8. Child-table Aggregation
-
-The reaction and drug datasets contain multiple records per adverse-event report.
-
-They are aggregated to report level using:
-
-```text
-number_of_reactions
-number_of_drugs
-```
-
-This allows the ML dataset to retain information from the normalized Silver layer without duplicating the report-level target.
-
----
-
-## 9. Derived Features
-
-### Transmission year
-
-Derived from the OpenFDA transmission date.
-
-### Transmission month
-
-Derived from the OpenFDA transmission date.
-
-### Reporting delay
-
-Calculated as the difference between the transmission date and received date.
-
-### Drug/reaction ratio
-
-Calculated as:
+`drug_reaction_ratio` is calculated as:
 
 ```text
 number_of_drugs / number_of_reactions
 ```
 
-A zero reaction count is protected against division by zero.
+with zero protection for reports without reactions.
+
+`reporting_delay_days` represents the difference between the transmission date and received date in the source data.
 
 ---
 
-## 10. Target Definition
+## 4. Target Definition
 
-The supervised-learning target is:
+The supervised learning target is:
 
 ```text
 target_serious
 ```
 
-The source `serious` field is normalized to binary form:
+It is derived from the source `serious` classification.
+
+The target was normalized to a binary representation:
 
 ```text
-0 = report is not marked serious
-1 = report is marked serious
+0 = Not Serious
+1 = Serious
 ```
 
-Current distribution:
+Observed target distribution:
+
+| Target      | Records | Percentage |
+| ----------- | ------: | ---------: |
+| Not Serious |     546 |      54.6% |
+| Serious     |     454 |      45.4% |
+| Total       |   1,000 |       100% |
+
+The target is therefore reasonably balanced for this controlled sample.
+
+---
+
+## 5. Target Leakage Review
+
+Before modelling, fields that could directly expose or strongly encode the target were excluded.
+
+Excluded fields:
 
 ```text
-0 = 546
-1 = 454
+serious
+seriousnessdeath
+fulfillexpeditecriteria
+patientdeathdate
+companynumb
+```
+
+`safetyreportid` was retained for traceability but excluded from the model feature matrix.
+
+### Rationale
+
+| Field                     | Treatment         | Reason                                                               |
+| ------------------------- | ----------------- | -------------------------------------------------------------------- |
+| `serious`                 | Excluded          | Source field used to construct the target                            |
+| `seriousnessdeath`        | Excluded          | Closely related to seriousness/death classification                  |
+| `fulfillexpeditecriteria` | Excluded          | Regulatory/reporting field potentially associated with seriousness   |
+| `patientdeathdate`        | Excluded          | Contains outcome information                                         |
+| `companynumb`             | Excluded          | Report/source identifier rather than a meaningful predictive feature |
+| `safetyreportid`          | Traceability only | Identifier and not used as a model feature                           |
+
+This leakage review was performed before the train/test modelling step.
+
+---
+
+## 6. Train/Test Design
+
+The dataset was split into:
+
+```text
+80% training
+20% test
+```
+
+with:
+
+```text
+random_state = 42
+stratify = target_serious
+```
+
+This produced:
+
+```text
+Training records: 800
+Test records:     200
+```
+
+Stratification was used to preserve the target-class distribution between training and test data.
+
+The test set was held out for final model evaluation.
+
+---
+
+## 7. Preprocessing
+
+The model contains both numerical and categorical variables.
+
+Numerical variables were processed using median imputation.
+
+Categorical variables were processed using:
+
+1. most-frequent-value imputation
+2. one-hot encoding
+
+The preprocessing was implemented as part of the model pipeline so that transformations are fitted using the training data rather than independently transforming the entire dataset before the split.
+
+This reduces the risk of preprocessing leakage.
+
+---
+
+## 8. Baseline Model
+
+A majority-class `DummyClassifier` was used as the baseline.
+
+Observed baseline performance:
+
+| Model             | Accuracy | Precision | Recall |     F1 |
+| ----------------- | -------: | --------: | -----: | -----: |
+| Majority Baseline |   0.5450 |    0.0000 | 0.0000 | 0.0000 |
+| XGBoost           |   0.7800 |    0.7831 | 0.7143 | 0.7471 |
+
+The baseline accuracy of 0.545 reflects the majority class in the training/test population.
+
+The baseline establishes a simple reference point before evaluating the more complex model.
+
+---
+
+## 9. XGBoost Model
+
+The supervised classifier used XGBoost with the following configuration:
+
+```text
+n_estimators = 200
+max_depth = 5
+learning_rate = 0.05
+subsample = 0.8
+colsample_bytree = 0.8
+objective = binary:logistic
+eval_metric = logloss
+random_state = 42
+```
+
+This configuration was selected as a controlled initial model rather than as the result of extensive hyperparameter optimisation.
+
+### Test-set results
+
+The model was evaluated on the 200-row holdout set.
+
+| Metric    | Result |
+| --------- | -----: |
+| Accuracy  | 0.7800 |
+| Precision | 0.7831 |
+| Recall    | 0.7143 |
+| F1        | 0.7471 |
+| ROC-AUC   | 0.8759 |
+| PR-AUC    | 0.8803 |
+
+These metrics describe performance on this controlled sample only. They should not be interpreted as production performance or as evidence that the model would generalize to the broader adverse-event reporting population.
+
+---
+
+## 10. Confusion Matrix
+
+The observed confusion matrix was:
+
+```text
+                    Predicted
+                 Not Serious  Serious
+
+Actual Not Serious      91       18
+Actual Serious          26       65
 ```
 
 Therefore:
 
 ```text
-Non-serious: 54.6%
-Serious:     45.4%
+True Negative  = 91
+False Positive = 18
+False Negative = 26
+True Positive   = 65
 ```
 
-The target is sufficiently represented in both classes for a controlled portfolio classification demonstration.
+The model correctly identified 65 of the 91 serious reports in the holdout set.
+
+It incorrectly classified 26 serious reports as not serious.
+
+This illustrates why accuracy alone is insufficient when evaluating a classification model.
 
 ---
 
-## 11. Target Leakage Controls
+## 11. Feature Importance
 
-The following fields are not used as predictive features because they may directly encode or strongly overlap with the seriousness outcome:
+The XGBoost model's highest feature-importance values were:
+
+| Feature                                 | Importance |
+| --------------------------------------- | ---------: |
+| `reportercountry_US`                    |   0.430432 |
+| `reporting_delay_days`                  |   0.088900 |
+| `transmission_year`                     |   0.083958 |
+| `transmission_month`                    |   0.054620 |
+| `reporterqualification`                 |   0.042045 |
+| `reportercountry_DE`                    |   0.039783 |
+| `number_of_reactions`                   |   0.034327 |
+| `reportercountry_COUNTRY NOT SPECIFIED` |   0.031618 |
+| `patientonsetage`                       |   0.030828 |
+| `patientonsetageunit_`                  |   0.029911 |
+
+### Interpretation and limitation
+
+`reportercountry_US` has substantially higher model feature importance than the other features in this controlled sample.
+
+This should **not** be interpreted as evidence that reporting country causes adverse-event seriousness.
+
+Possible explanations include:
+
+* differences in reporting practices
+* differences in dataset composition
+* source-system characteristics
+* regulatory/reporting processes
+* sampling effects
+
+The feature should therefore be treated as a model signal requiring further investigation rather than as a causal or clinical finding.
+
+A larger and more representative dataset would be required before drawing stronger conclusions about feature stability or generalisation.
+
+---
+
+## 12. SHAP Explainability
+
+SHAP was used to examine how individual features contributed to XGBoost predictions.
+
+The SHAP analysis is intended to answer:
+
+> Which features influenced the model's predictions, and in which direction?
+
+SHAP explanations describe model behaviour.
+
+They do not establish:
+
+* drug causality
+* clinical causation
+* population-level risk
+* treatment effectiveness
+
+The SHAP summary plot was generated in the Databricks ML notebook.
+
+---
+
+## 13. Isolation Forest Anomaly Detection
+
+A separate Isolation Forest model was used for unsupervised anomaly screening.
+
+The objective is different from the XGBoost classification task.
+
+### XGBoost
 
 ```text
-seriousnessdeath
-patientdeathdate
-fulfillexpeditecriteria
+Question:
+Can the available features predict the serious/non-serious classification?
 ```
 
-The following identifier is retained only for traceability:
+### Isolation Forest
+
+```text
+Question:
+Which reports have feature combinations that appear unusual
+relative to the rest of the sample?
+```
+
+Isolation Forest was configured with:
+
+```text
+n_estimators = 200
+contamination = 0.05
+random_state = 42
+```
+
+The model therefore flagged approximately 5% of the test population as anomalous.
+
+The anomaly output included:
+
+```text
+anomaly_prediction
+anomaly_score
+is_anomaly
+```
+
+The lowest anomaly scores observed in the test sample included reports with unusual combinations of reporting delay, drug/reaction counts, age information, reporter country, and other features.
+
+An anomaly flag is a **screening signal**, not evidence of an error, fraud, unsafe product, or clinical danger.
+
+---
+
+## 14. Databricks ML Experimentation
+
+The ML workflow was implemented in the Databricks Free Edition notebook:
+
+```text
+notebooks/Day6_OpenFDA_ML.ipynb
+```
+
+The notebook contains:
+
+1. data loading
+2. data-quality audit
+3. target inspection
+4. leakage review
+5. preprocessing
+6. train/test split
+7. baseline model
+8. XGBoost model
+9. evaluation metrics
+10. confusion matrix
+11. feature importance
+12. SHAP explainability
+13. Isolation Forest anomaly detection
+14. MLflow experiment tracking
+15. ML prediction output generation
+
+The notebook is version-controlled as part of the GitHub repository.
+
+---
+
+## 15. ML Prediction Output
+
+The model generated predictions for the 200-row holdout test set.
+
+The prediction dataset contains:
 
 ```text
 safetyreportid
+actual_serious
+predicted_serious
+predicted_probability
 ```
 
-It is excluded from model training.
-
-The target itself is also excluded from the model feature matrix:
+Example records served through Synapse:
 
 ```text
-target_serious
+safetyreportid,actual_serious,predicted_serious,predicted_probability
+10004170,1,1,0.5010936
+10003987,0,0,0.13284644
+10003952,1,0,0.4744376
+10003601,0,0,0.19056003
+10004152,1,1,0.97840196
+10003926,1,0,0.26425228
+10003792,1,1,0.9257659
+10003434,0,0,0.05613183
+10003665,0,0,0.18527436
+10004028,0,0,0.46103808
 ```
 
-The project will review feature availability and leakage before interpreting model performance.
+`predicted_probability` represents the XGBoost probability assigned to the positive class (`Serious`).
+
+The probability is a model output and has not been calibrated as a production risk probability.
 
 ---
 
-## 12. Model Objective
+## 16. ADLS ML Layer
 
-The supervised learning question is:
-
-> Can characteristics available in an adverse-event report distinguish reports that are marked as serious from reports that are not marked as serious?
-
-This is a classification task.
-
-The model does not determine whether a drug caused an adverse event.
-
-The model predicts a classification based on characteristics present in the analytical dataset.
-
----
-
-## 13. Baseline Model
-
-A simple majority-class baseline will be established before using machine learning.
-
-The baseline answers:
-
-> How well can we perform without learning relationships between the features?
-
-This provides a reference point for evaluating the XGBoost model.
-
----
-
-## 14. Supervised Model
-
-The primary supervised model is XGBoost.
-
-The planned workflow is:
+The ML prediction output is stored in the ADLS ML layer:
 
 ```text
-ML feature dataset
-       |
-       v
-Train/test split
-       |
-       v
-Preprocessing
-       |
-       v
-XGBoost classifier
-       |
-       v
-Predictions
-       |
-       v
-Evaluation
+healthcare/ml/openfda/openfda_ml_predictions.parquet
 ```
 
-The train/test split will preserve the target class distribution using stratification.
-
-The model will be evaluated using multiple metrics rather than accuracy alone.
-
-Planned metrics:
-
-* Accuracy
-* Precision
-* Recall
-* F1 score
-* ROC-AUC
-* PR-AUC
-* Confusion matrix
-
-Because the target represents reported seriousness, recall and precision are considered alongside overall accuracy.
-
----
-
-## 15. Unsupervised Anomaly Detection
-
-Isolation Forest will be used as a separate analytical workflow.
-
-The question is:
-
-> Which adverse-event reports have feature combinations that appear unusual relative to the other reports?
-
-This is different from the supervised classification problem.
-
-The anomaly model does not require `target_serious`.
-
-The outputs will include an anomaly indicator and anomaly score.
-
----
-
-## 16. Model Explainability
-
-SHAP will be used to explain the supervised XGBoost model.
-
-The objective is to understand which features contributed to model predictions.
-
-The project will distinguish between:
+The ML feature dataset is:
 
 ```text
-model association / contribution
+healthcare/ml/openfda/openfda_ml_features.parquet
+```
+
+This creates a separation between:
+
+```text
+ML features
 ```
 
 and:
 
 ```text
-causal effect
+ML predictions
 ```
 
-SHAP explanations will not be interpreted as evidence that a drug or characteristic causes an adverse event.
+which allows downstream analytical systems to consume model outputs without requiring direct access to the Databricks notebook.
 
 ---
 
-## 17. MLflow Experiment Tracking
+## 17. Synapse Serverless Serving Layer
 
-MLflow will be used to record the machine-learning experiment.
+Synapse Serverless SQL reads the ML prediction Parquet from ADLS.
 
-The experiment will capture:
-
-* model type
-* model parameters
-* evaluation metrics
-* model artifacts
-* explainability artifacts where appropriate
-
-The intended experiment structure is:
+The serving view is:
 
 ```text
-OpenFDA ML Experiment
-|
-+-- Majority Baseline
-|
-+-- XGBoost Classifier
-|
-+-- Isolation Forest
-|
-+-- Evaluation Metrics
-|
-+-- SHAP Artifacts
+dbo.vw_openfda_ml_predictions
 ```
 
----
-
-## 18. Missing Data Strategy
-
-Missing values will not automatically cause records to be discarded.
-
-The current ML feature dataset contains:
+The view exposes:
 
 ```text
-patientonsetage          341 missing
-patientsex                 4 missing
-reporterqualification      7 missing
+safetyreportid
+actual_serious
+predicted_serious
+predicted_probability
 ```
 
-The preprocessing pipeline will handle numeric and categorical missing values separately.
+Example query:
 
-The chosen imputation strategy will be documented with the model implementation.
+```sql
+SELECT TOP 20 *
+FROM dbo.vw_openfda_ml_predictions;
+```
 
----
+This successfully returned ML prediction records from the Synapse serving layer.
 
-## 19. Data Quality Checks
-
-The ML feature dataset must satisfy:
+The resulting architecture is:
 
 ```text
-1. One row per safetyreportid
-2. No duplicate safetyreportid
-3. target_serious is not null
-4. target_serious contains only 0 and 1
-5. number_of_reactions is non-negative
-6. number_of_drugs is non-negative
-7. transmission_year is populated
-8. transmission_month is populated
-9. No identifier is used as a predictive feature
-10. Leakage-prone fields are excluded
+Databricks ML
+      ↓
+ADLS ML
+      ↓
+Synapse Serverless
+      ↓
+dbo.vw_openfda_ml_predictions
+      ↓
+Power BI
 ```
 
 ---
 
-## 20. Limitations
+## 18. Power BI Foundation
 
-The OpenFDA adverse-event dataset has important analytical limitations.
+Power BI consumes the Synapse serving view rather than connecting directly to the Databricks notebook.
 
-Adverse-event reports are spontaneous safety reports and are subject to reporting and selection biases.
+The intended ML analytics page contains:
 
-A report does not establish that a drug caused the reported reaction.
+### KPI
+
+Total ML prediction records.
+
+### KPI
+
+Predicted serious reports.
+
+### KPI
+
+Predicted serious percentage.
+
+### Comparison
+
+Actual serious classification versus predicted serious classification.
+
+### Distribution
+
+Distribution of `predicted_probability`.
+
+The dashboard is intended for analytical exploration rather than clinical decision-making.
+
+---
+
+## 19. Data Quality and Validation
+
+Day 6 validation covers:
+
+### Dataset validation
+
+* 1,000 input adverse-event reports
+* 2,749 reaction records
+* 3,079 drug records
+* 1,000 ML feature rows
+* no duplicate adverse-event IDs in the Silver event dataset
+* target has no null values
+* feature-level missingness is retained and handled during modelling
+
+### Model validation
+
+* 80/20 stratified train/test split
+* 200 holdout records
+* baseline model established
+* classification metrics calculated
+* confusion matrix calculated
+* ROC-AUC calculated
+* PR-AUC calculated
+* feature importance generated
+* SHAP analysis generated
+* Isolation Forest anomaly screening completed
+
+### Serving validation
+
+* ML prediction Parquet written to ADLS ML layer
+* Synapse Serverless reads the Parquet
+* `dbo.vw_openfda_ml_predictions` exposes the model output
+* Power BI can consume the Synapse serving layer
+
+---
+
+## 20. Automated Repository Tests
+
+Day 6 adds:
+
+```text
+tests/test_day6_ml.py
+```
+
+The test suite validates the expected Day 6 repository structure and ML artefacts without requiring the Databricks runtime.
+
+The tests check that:
+
+* the ML transformation exists
+* the Day 6 notebook exists
+* the Day 6 documentation exists
+* the ML feature dataset definition exists
+* the expected ML transformation columns are present in the source code
+* leakage-control fields are explicitly excluded
+* the documentation contains the recorded model results
+* the prediction-serving view is documented
+
+The repository also continues to use Python compilation validation:
+
+```bash
+python -m compileall ingestion scripts transformations
+```
+
+---
+
+## 21. Testing Limitation
+
+The local Cloud Shell environment used for the final repository validation did not have the `pytest` executable available in the active shell session at the time of documentation.
+
+Python source compilation completed successfully:
+
+```text
+python -m compileall ingestion scripts transformations
+```
+
+The Day 6 test file is therefore designed as a lightweight repository/artefact test and should be executed after activating the project's Python environment where `pytest` is installed.
+
+Expected command:
+
+```bash
+pytest -q
+```
+
+or, when using the project virtual environment:
+
+```bash
+.venv/bin/pytest -q
+```
+
+---
+
+## 22. Reproducibility
+
+The ML workflow is version-controlled through:
+
+```text
+notebooks/Day6_OpenFDA_ML.ipynb
+transformations/ml/openfda_features.py
+tests/test_day6_ml.py
+docs/day6-analytics-ml.md
+```
+
+The notebook records the modelling methodology and experiment outputs.
+
+The transformation script creates the reusable ML feature dataset.
+
+The ADLS ML layer stores the ML feature and prediction outputs used by downstream serving.
+
+---
+
+## 23. Important Analytical Limitations
+
+The openFDA adverse-event reporting data has important limitations.
+
+The records represent submitted adverse-event reports rather than a controlled clinical study population.
 
 Therefore this project does not estimate:
 
-* drug causality
-* adverse-event incidence
-* population-level risk
-* clinical effectiveness
-* patient-level clinical outcomes
+* incidence rates
+* relative risk
+* treatment effectiveness
+* population prevalence
+* causal relationships between drugs and adverse reactions
 
-The ML results should be interpreted as an engineering and analytical demonstration using a controlled sample.
+Reporting volume can be affected by:
 
-The 1,000-report dataset is not intended to represent the complete OpenFDA reporting population.
+* reporting practices
+* regulatory processes
+* geography
+* product exposure
+* media attention
+* changes in reporting systems
+* selection bias
+
+The ML model therefore demonstrates an engineering and analytical workflow rather than a validated clinical risk model.
+
+The 1,000-record controlled sample is also insufficient for production deployment or claims about generalisation.
 
 ---
 
-## 21. Reproducibility
+## 24. Engineering Outcome
 
-The project maintains a controlled 1,000-report analytical sample.
+Day 6 demonstrates the transition from a lakehouse data platform into an ML-enabled analytical workflow.
 
-The same sample is used consistently through:
+The completed flow is:
 
 ```text
-RAW
+Public data
+    ↓
+ADF ingestion
+    ↓
+ADLS RAW
+    ↓
 Bronze
+    ↓
 Silver
-Gold
-ML features
+    ↓
+ML feature engineering
+    ↓
+Databricks ML experimentation
+    ↓
+XGBoost classification
+    ↓
+Isolation Forest anomaly screening
+    ↓
+SHAP explainability
+    ↓
+ML predictions
+    ↓
+ADLS ML layer
+    ↓
+Synapse Serverless
+    ↓
+Power BI
 ```
 
-This allows the transformation and ML workflow to be reproduced without depending on a changing external API response.
+The implementation demonstrates separation of:
 
-OpenFDA API pagination beyond the current controlled sample is maintained as a future engineering enhancement.
+* ingestion
+* storage
+* transformation
+* feature engineering
+* model experimentation
+* model outputs
+* SQL serving
+* BI consumption
+
+The Databricks Free Edition environment imposes limitations on direct external cloud-storage configuration. The project therefore uses the Databricks Unity Catalog volume for the ML experimentation environment and transfers the generated ML prediction output into the Azure ADLS ML layer for downstream Synapse and Power BI consumption. This limitation is explicitly documented rather than represented as a fully automated production Databricks integration.
 
 ---
 
-## 22. Engineering Outcome
+## 25. Day 6 Completion Criteria
 
-Day 6 extends the lakehouse from data engineering into machine-learning engineering.
+Day 6 is considered complete when the following are version-controlled and validated:
 
-The project demonstrates:
+* [x] OpenFDA Silver datasets available
+* [x] ML feature transformation implemented
+* [x] ML feature dataset generated
+* [x] Target and leakage controls documented
+* [x] Baseline model implemented
+* [x] XGBoost classifier implemented
+* [x] XGBoost evaluation completed
+* [x] Confusion matrix generated
+* [x] Feature importance generated
+* [x] SHAP analysis completed
+* [x] Isolation Forest anomaly detection completed
+* [x] MLflow experiment tracking attempted/completed in Databricks
+* [x] ML prediction output generated
+* [x] ML prediction output available in ADLS ML layer
+* [x] Synapse Serverless serving view created
+* [x] Power BI serving foundation established
+* [x] Databricks notebook exported to GitHub
+* [x] Day 6 repository test added
+* [x] Python compilation validation completed
+* [ ] Final pytest execution completed in the project Python environment
+* [ ] Git commit and push completed
 
-* API ingestion
-* Azure Data Factory orchestration
-* ADLS Gen2 storage
-* medallion architecture
-* normalized Silver datasets
-* report-level feature engineering
-* supervised classification
-* unsupervised anomaly detection
-* model explainability
-* experiment tracking
-* downstream lakehouse integration
+---
 
-The resulting architecture separates:
+## 26. Day 6 Portfolio Positioning
+
+The project should be described as:
+
+> A cloud data engineering and analytics pipeline that ingests public-health and adverse-event data into Azure ADLS Gen2, applies medallion transformations, engineers ML features, performs supervised and unsupervised ML experimentation in Databricks, and serves ML outputs through Synapse Serverless for Power BI analytics.
+
+The ML component demonstrates:
 
 ```text
-data ingestion
-data transformation
-feature engineering
-model training
-model explainability
-model tracking
-business analytics
+Data engineering
+      +
+Machine learning
+      +
+Explainability
+      +
+Data quality
+      +
+SQL serving
+      +
+BI consumption
 ```
 
-rather than combining all processing into a single notebook.
+It should not be presented as a production clinical prediction system.
