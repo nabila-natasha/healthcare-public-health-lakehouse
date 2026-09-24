@@ -1,128 +1,103 @@
-# Day 7 — Power BI Serving, Batch Validation & Analytics
+# Day 7 — Power BI Serving, ML Analytics & Anomaly Screening
 
-## 1. Day 7 Objective
+## Objective
 
-Day 7 focuses on completing the analytical serving layer and preparing the Azure lakehouse outputs for business-facing analytics in Power BI.
+Day 7 completes the business-facing serving and analytics layer of the Azure healthcare/public-health lakehouse.
 
-The main objectives are:
+The objective is to expose validated CDC public-health surveillance data, OpenFDA adverse-event analytics, and OpenFDA machine-learning outputs through Synapse Serverless and Power BI.
 
-1. Validate the OpenFDA paginated batch ingestion implemented with Azure Data Factory.
-2. Configure scheduled execution for the OpenFDA batch pipeline.
-3. Expose curated CDC, OpenFDA, and OpenFDA ML datasets through Synapse Serverless.
-4. Establish a Power BI semantic model using fact and dimension tables.
-5. Build three business-facing dashboards covering:
+The implementation demonstrates:
 
-   * Public-health surveillance analytics
-   * OpenFDA adverse-event analytics
-   * OpenFDA ML and anomaly analytics
-6. Validate that dashboard metrics reconcile with the underlying lakehouse data.
-7. Document architectural and analytical decisions for portfolio and interview use.
+* Azure Data Factory batch ingestion with REST API pagination
+* Event Hubs streaming and CDC Bronze/Silver/Gold processing
+* OpenFDA Bronze/Silver/Gold processing
+* Synapse Serverless external views over ADLS Gen2 Parquet
+* Power BI semantic modelling
+* Business-facing analytics dashboards
+* XGBoost predictive classification
+* Isolation Forest anomaly screening
+* Feature-importance interpretation
+* ML output serving through the lakehouse
+* Data-quality and analytical guardrails
+
+The project uses public or synthetic data only. It does not process PHI or production clinical data.
 
 ---
 
-# 2. Day 7 Architecture
-
-The Day 7 analytical flow is:
+# 1. Day 7 Architecture
 
 ```text
-                    ┌──────────────────────┐
-                    │   CDC Historical     │
-                    │ Surveillance Dataset │
-                    └──────────┬───────────┘
-                               │
-                               ▼
-                         Event Producer
-                               │
-                               ▼
-                      Azure Event Hubs
-                               │
-                               ▼
-                         Bronze / CDC
-                               │
-                               ▼
-                         Silver / CDC
-                               │
-                               ▼
-                          Gold / CDC
-                               │
-                               ▼
+                         DATA SOURCES
+                              │
+             ┌────────────────┴─────────────────┐
+             │                                  │
+       CDC Archived API                    openFDA API
+             │                                  │
+             ▼                                  ▼
+       Event Hubs                         Azure Data Factory
+             │                                  │
+             ▼                                  ▼
+        ADLS RAW/C DC                     ADLS RAW/openFDA
+             │                                  │
+             ▼                                  ▼
+        Bronze Layer                       Bronze Layer
+             │                                  │
+             ▼                                  ▼
+        Silver Layer                       Silver Layer
+             │                                  │
+             ▼                                  ▼
+          Gold Layer                        Gold Layer
+             │                                  │
+             └────────────────┬─────────────────┘
+                              │
+                              ▼
                        Synapse Serverless
-                               │
-                               ▼
-                            Power BI
-
-
-┌───────────────────┐
-│     openFDA API   │
-└─────────┬─────────┘
-          │
-          ▼
- Azure Data Factory
-          │
-          ▼
-     ADLS RAW
-          │
-          ▼
-    ADLS Bronze
-          │
-          ▼
-    ADLS Silver
-          │
-          ▼
-     ADLS Gold
-          │
-          ├───────────────────────┐
-          │                       │
-          ▼                       ▼
- Synapse Serverless       Databricks Free Edition
-          │                       │
-          │                       ▼
-          │                 ML Predictions
-          │                       │
-          │                       ▼
-          │                  ADLS ML layer
-          │                       │
-          └───────────┬───────────┘
-                      ▼
-                   Power BI
+                              │
+                 ┌────────────┴────────────┐
+                 │                         │
+                 ▼                         ▼
+          Analytics Views              ML Views
+                 │                         │
+                 └────────────┬────────────┘
+                              ▼
+                          Power BI
+                              │
+          ┌───────────────────┼───────────────────┐
+          ▼                   ▼                   ▼
+       CDC Dashboard     OpenFDA Dashboard    ML & Anomaly
+                                               Dashboard
 ```
-
-Power BI is therefore positioned as the business-facing consumption layer rather than as the transformation engine.
 
 ---
 
-# 3. OpenFDA Batch Ingestion Validation
+# 2. Azure Data Factory — OpenFDA Batch Ingestion
 
-## 3.1 Azure Data Factory Pipeline
+## Pipeline
 
-The OpenFDA batch ingestion pipeline is:
+ADF pipeline:
 
-```text
-PL_openFDA_Batch_Ingestion
-```
+`PL_openFDA_Batch_Ingestion`
 
-The pipeline uses:
+Copy activity:
 
-* Azure Data Factory
-* REST linked service
-* REST dataset
-* ADLS Gen2 sink
-* Dataset parameter for the OpenFDA API key
-* REST pagination
+`Copy_openFDA_to_RAW`
 
-The pipeline writes the canonical raw OpenFDA dataset to:
+Linked services:
+
+* `LS_openFDA_REST`
+* `LS_ADLS_healthcare`
+
+Destination:
 
 ```text
 healthcare/raw/openfda/openfda_adverse_events.json
 ```
 
----
+The OpenFDA REST API was configured with pagination because the API response limit is smaller than the required extraction volume.
 
-## 3.2 Pagination Design
+### Final pagination configuration
 
-The OpenFDA API uses `skip` and `limit` parameters for pagination.
-
-The final ADF relative URL is:
+Relative URL:
 
 ```text
 @concat(
@@ -132,17 +107,19 @@ The final ADF relative URL is:
 )
 ```
 
-The pagination configuration is:
+Pagination key:
 
 ```text
-Pagination Key:
 QueryParameters.{skip}
+```
 
-Pagination Value:
+Pagination value:
+
+```text
 RANGE:0:3000:1000
 ```
 
-This results in four API requests:
+This produced four API pages:
 
 ```text
 skip=0
@@ -151,516 +128,261 @@ skip=2000
 skip=3000
 ```
 
-Each request retrieves up to 1,000 reports.
+Each page returned 1,000 reports.
+
+Validation confirmed:
+
+* JSON documents/pages: 4
+* Total reports: 4,000
+* Unique `safetyreportid`: 4,000
+* Duplicate `safetyreportid`: 0
+* First `safetyreportid`: `5801206-7`
+* Last `safetyreportid`: `10007321`
+
+`rowsRead = 4` in the ADF Copy activity refers to the four REST response pages, not four adverse-event records.
+
+ADF wrote the paginated responses into one canonical RAW JSON file. Splitting each API page into a separate storage file was not required because API pagination is an ingestion mechanism rather than an ADLS partitioning requirement.
+
+### ADF Copy activity result
+
+```text
+dataRead: 79,401,072
+dataWritten: 47,543,231
+filesWritten: 1
+rowsRead: 4
+rowsCopied: 4
+copyDuration: 40 seconds
+errors: []
+status: Succeeded
+```
+
+The ADF data-consistency verification field reported `NotVerified`; record-level uniqueness was therefore independently validated using the downloaded RAW file.
 
 ---
 
-## 3.3 Pagination Validation
+# 3. ADF Scheduled Trigger
 
-The API pagination was independently validated before relying on the ADF configuration.
-
-| Page |  Skip | Results | First safetyreportid | Last safetyreportid |
-| ---- | ----: | ------: | -------------------- | ------------------- |
-| 1    |     0 |   1,000 | 5801206-7            | 10004305            |
-| 2    | 1,000 |   1,000 | 10004306             | 10005311            |
-| 3    | 2,000 |   1,000 | 10005312             | 10006318            |
-| 4    | 3,000 |   1,000 | 10006319             | 10007321            |
-
-The final four-page ADF validation produced:
+A scheduled trigger was configured:
 
 ```text
-JSON documents:       4
-Total reports:        4,000
-Unique safetyreportid: 4,000
-Duplicate IDs:        0
-First safetyreportid: 5801206-7
-Last safetyreportid:  10007321
+TRG_openFDA_Daily
 ```
 
-This demonstrates that the pagination configuration retrieves four distinct pages rather than repeatedly retrieving the first page.
+Configuration:
+
+* Frequency: Every 1 day
+* Time zone: `(UTC+08:00) Kuala Lumpur, Singapore`
+* Start trigger on creation: Enabled
+
+The trigger provides scheduled batch orchestration for OpenFDA ingestion.
+
+This is intentionally separate from the Event Hubs streaming path.
+
+### Architectural distinction
+
+ADF is used for:
+
+```text
+Scheduled batch ingestion
+```
+
+Event Hubs is used for:
+
+```text
+Streaming/event ingestion
+```
+
+The CDC path therefore does not depend on the ADF schedule.
 
 ---
 
-## 3.4 ADF Copy Activity Result
+# 4. OpenFDA Gold Analytics
 
-The successful ADF Copy activity returned:
-
-```text
-dataRead:              79,401,072
-dataWritten:           47,543,231
-filesWritten:          1
-rowsRead:              4
-rowsCopied:            4
-copyDuration:          40 seconds
-throughput:            3781.003
-errors:                []
-parallelCopies:        1
-```
-
-An important interpretation is that:
-
-```text
-rowsRead = 4
-```
-
-does **not** mean four OpenFDA reports were ingested.
-
-It represents four paginated REST response documents.
-
-The four response pages were combined into the canonical raw JSON output:
-
-```text
-healthcare/raw/openfda/openfda_adverse_events.json
-```
-
-This is intentional. API pagination controls how data is retrieved; it does not require the raw dataset to be physically partitioned into four files.
-
----
-
-# 4. OpenFDA Analytical Data Layers
-
-The canonical OpenFDA data flow is:
-
-```text
-RAW
-healthcare/raw/openfda/openfda_adverse_events.json
-        │
-        ▼
-BRONZE
-healthcare/bronze/openfda/openfda_adverse_events.csv
-        │
-        ▼
-SILVER
-healthcare/silver/openfda/
-├── adverse_events.parquet
-├── adverse_event_reactions.parquet
-└── adverse_event_drugs.parquet
-        │
-        ▼
-GOLD
-healthcare/gold/openfda/openfda_gold.parquet
-        │
-        ├─────────────────────┐
-        ▼                     ▼
-Synapse Serverless       ML Feature Engineering
-                              │
-                              ▼
-                         Databricks ML
-                              │
-                              ▼
-                           ML Layer
-```
-
----
-
-# 5. OpenFDA Gold Analytical Dataset
-
-The OpenFDA Gold dataset is:
+OpenFDA Gold is stored at:
 
 ```text
 healthcare/gold/openfda/openfda_gold.parquet
 ```
 
-Its analytical grain is:
+Grain:
 
 ```text
 reporter_country + transmission_date
 ```
 
-The validated dataset contains:
+Columns include:
 
-```text
-Rows:             78
-Countries:        34
-Source reports:   1,000
-```
+* `reporter_country`
+* `transmission_date`
+* `adverse_event_reports`
+* `serious_reports`
+* `death_reports`
+* `expedited_reports`
+* `serious_report_pct`
+* `death_report_pct`
+* `expedited_report_pct`
 
-The additive report count reconciles to:
+Validation:
 
-```text
-SUM(adverse_event_reports) = 1,000
-```
+* 78 Gold rows
+* 34 reporter countries
+* 1,000 total reports represented
 
-The Gold dataset contains:
+The Power BI model calculates percentages from additive counts rather than averaging precomputed percentages. This allows percentages to recalculate correctly when users filter by country or date.
 
-```text
-reporter_country
-transmission_date
-adverse_event_reports
-serious_reports
-death_reports
-expedited_reports
-serious_report_pct
-death_report_pct
-expedited_report_pct
-```
-
-The percentage fields are retained in the Gold dataset for analytical completeness.
-
-However, Power BI percentage measures are calculated from additive counts rather than by averaging these precomputed percentages.
-
-For example:
+Example measures:
 
 ```DAX
-Serious Report % =
-DIVIDE(
-    [Serious Reports],
-    [Total Reports],
-    0
-)
-```
+Total Reports =
+SUM(FactOpenFDAAnalytics[adverse_event_reports])
 
-This ensures that the percentage responds correctly when users filter by country, date, or other dimensions.
+Serious Reports =
+SUM(FactOpenFDAAnalytics[serious_reports])
+
+Death Reports =
+SUM(FactOpenFDAAnalytics[death_reports])
+
+Expedited Reports =
+SUM(FactOpenFDAAnalytics[expedited_reports])
+
+Serious Report % =
+DIVIDE([Serious Reports], [Total Reports], 0)
+
+Death Report % =
+DIVIDE([Death Reports], [Total Reports], 0)
+
+Expedited Report % =
+DIVIDE([Expedited Reports], [Total Reports], 0)
+```
 
 ---
 
-# 6. Synapse Serverless Analytical Serving
+# 5. Synapse Serverless Serving Layer
 
-Synapse Serverless is used as the SQL-based serving layer over ADLS Parquet files.
+Synapse Serverless provides SQL views over ADLS Gen2 Parquet files.
 
-The external data source is:
+External data source:
 
 ```text
 HealthcareADLS
 ```
 
-The OpenFDA analytical view is:
+The following views are used for Power BI serving.
+
+## OpenFDA analytics
 
 ```text
 dbo.vw_openfda_analytics
 ```
 
-The view exposes:
-
-```text
-reporter_country
-transmission_date
-adverse_event_reports
-serious_reports
-death_reports
-expedited_reports
-```
-
-The view reads:
+Source:
 
 ```text
 gold/openfda/openfda_gold.parquet
 ```
 
-using:
-
-```sql
-OPENROWSET(
-    BULK 'gold/openfda/openfda_gold.parquet',
-    DATA_SOURCE = 'HealthcareADLS',
-    FORMAT = 'PARQUET'
-)
-```
-
-The date is converted to a SQL `date` type before being exposed to Power BI.
-
----
-
-# 7. ML Serving Layer
-
-The Databricks Free Edition ML experiment produces:
-
-```text
-openfda_ml_predictions.parquet
-```
-
-The canonical ADLS ML location is:
-
-```text
-healthcare/ml/openfda/openfda_ml_predictions.parquet
-```
-
-The Synapse serving view is:
+## OpenFDA ML predictions
 
 ```text
 dbo.vw_openfda_ml_predictions
 ```
 
-This view provides the prediction output for Power BI.
-
-The ML layer is intended for:
-
-* predictive screening of reported-event seriousness
-* unusual reporting-pattern screening
-* model performance analysis
-* feature-importance analysis
-
-It is **not** intended to provide:
-
-* clinical diagnosis
-* clinical decision support
-* causal inference
-* population incidence estimates
-* fraud determinations
-
-An anomaly is treated as an unusual reporting pattern requiring further review, rather than automatically representing fraud, danger, or a clinical issue.
-
----
-
-# 8. Power BI Semantic Model
-
-Power BI uses a dimensional model rather than directly connecting every visual to raw datasets.
-
-The planned model contains three independent fact tables:
+Source:
 
 ```text
-FactCDCStateSurveillance
-FactOpenFDAAnalytics
-FactOpenFDAML
+ml/openfda/openfda_ml_predictions.parquet
 ```
 
-and shared dimensions where appropriate:
+## OpenFDA feature importance
 
 ```text
-DimDate
-DimCountry
-DimState
+dbo.vw_openfda_feature_importance
 ```
 
-The conceptual model is:
+Source:
 
 ```text
-                 DimDate
-                    │
-                    │
-          ┌─────────┴─────────┐
-          │                   │
-          ▼                   ▼
-FactCDCState          FactOpenFDAAnalytics
-Surveillance                  │
-                              │
-                              ▼
-                         DimCountry
-
-
-                         DimCountry
-                              │
-                              ▼
-                        FactOpenFDAML
-```
-
-The facts remain independent.
-
-There are no direct fact-to-fact relationships.
-
-This prevents accidental filter propagation between unrelated analytical grains.
-
----
-
-# 9. Fact Table Grains
-
-## 9.1 CDC Fact
-
-```text
-FactCDCStateSurveillance
+ml/openfda/openfda_feature_importance.parquet
 ```
 
 Grain:
 
 ```text
-one row per state and surveillance period
+one row per model feature
 ```
 
-Primary analytical fields include:
+Columns:
 
 ```text
-state
-date
-tot_cases
-new_cases
-tot_deaths
-new_deaths
+feature
+importance
 ```
+
+## OpenFDA anomalies
+
+```text
+dbo.vw_openfda_anomalies
+```
+
+Source:
+
+```text
+ml/openfda/openfda_anomalies.parquet
+```
+
+Columns:
+
+```text
+safetyreportid
+anomaly_prediction
+anomaly_score
+is_anomaly
+```
+
+The feature-importance and anomaly outputs are exposed as separate views because they represent different analytical grains.
 
 ---
 
-## 9.2 OpenFDA Analytics Fact
+# 6. Databricks ML Outputs
+
+The OpenFDA ML workflow was developed in Databricks Free Edition.
+
+Notebook:
 
 ```text
-FactOpenFDAAnalytics
+notebooks/Day6_OpenFDA_ML.ipynb
 ```
 
-Grain:
+The notebook performs:
+
+* Feature preparation
+* XGBoost seriousness classification
+* Holdout evaluation
+* Feature importance extraction
+* Isolation Forest anomaly screening
+
+ML artifacts:
 
 ```text
-one row per reporter country and transmission date
+healthcare/ml/openfda/openfda_ml_features.parquet
+healthcare/ml/openfda/openfda_ml_predictions.parquet
+healthcare/ml/openfda/openfda_feature_importance.parquet
+healthcare/ml/openfda/openfda_anomalies.parquet
 ```
 
-This table supports reporting-volume and seriousness analysis.
+The Databricks Free Edition environment uses a managed Unity Catalog volume for ML experimentation.
+
+Because the Free Edition environment does not provide the required arbitrary ADLS Spark configuration for the intended direct external-storage integration, the final ML Parquet outputs were transferred to the canonical ADLS ML layer as a documented manual handoff.
+
+The project therefore does **not** claim a fully automated Databricks-to-ADLS production integration.
 
 ---
 
-## 9.3 OpenFDA ML Fact
+# 7. XGBoost Model Results
 
-```text
-FactOpenFDAML
-```
+The model was evaluated on a 200-row holdout set.
 
-Grain:
-
-```text
-one row per safetyreportid and model prediction
-```
-
-This table supports:
-
-* predicted seriousness
-* prediction probability
-* actual versus predicted classification
-* anomaly screening
-* model diagnostics
-
----
-
-# 10. Date Dimension
-
-A conformed `DimDate` is used for date filtering.
-
-The dimension contains:
-
-```text
-DateKey
-Date
-Year
-Quarter
-Month
-MonthNumber
-MonthName
-YearMonth
-```
-
-The Power BI model uses:
-
-```text
-DimDate[Date]
-```
-
-for calendar-based filtering.
-
-The date column is used instead of an automatically generated Power BI date hierarchy so that the model has explicit control over date attributes.
-
----
-
-# 11. Power BI Dashboard Design
-
-Three dashboards are being developed.
-
-## Dashboard 1 — CDC Public Health Surveillance Analytics
-
-### Purpose
-
-Provide historical public-health surveillance analytics from the archived CDC dataset.
-
-This dashboard is intended for analytical and reporting purposes rather than live clinical monitoring.
-
-### KPIs
-
-```text
-Total Cases
-Total Deaths
-New Cases
-States Covered
-```
-
-### Planned visuals
-
-* Cases over time
-* Deaths over time
-* Cases by state
-* Deaths by state
-* Selected-state trend
-* Date slicer
-* State slicer
-
-### Questions addressed
-
-* How did reported cases change over the surveillance period?
-* How did reported deaths change?
-* Which states account for the largest reported volumes?
-* How do patterns differ when the user selects a specific state or period?
-
----
-
-# 12. OpenFDA Surveillance Analytics
-
-### Purpose
-
-Provide descriptive analytics of adverse-event reporting patterns.
-
-### KPIs
-
-```text
-Total Reports
-Serious Reports
-Serious Report %
-Countries Covered
-```
-
-### Planned visuals
-
-* Reports over time
-* Reports by country
-* Observed seriousness rate by country
-* Serious versus non-serious reports
-* Date slicer
-* Country slicer
-
-### Questions addressed
-
-* How are reports distributed over time?
-* How are reports distributed geographically?
-* What proportion of reports are classified as serious?
-* How do report volume and observed seriousness rate differ across countries?
-
-### Interpretation
-
-The dashboard describes reported-event patterns.
-
-It does not estimate population incidence or establish causality.
-
-Differences between countries may reflect factors such as:
-
-* reporting practices
-* dataset composition
-* regulatory processes
-* reporting volume
-* other characteristics of the reporting system
-
-Therefore, a higher observed reporting proportion should not automatically be interpreted as a higher underlying population risk.
-
----
-
-# 13. OpenFDA ML & Anomaly Analytics
-
-### Purpose
-
-Present the output of the ML experimentation layer in a business-readable format.
-
-### KPIs
-
-```text
-Total Scored Reports
-Predicted Serious
-Predicted Serious %
-Anomalies
-```
-
-### Planned visuals
-
-* Predicted probability distribution
-* Confusion matrix
-* Model performance metrics
-* Feature importance
-* Anomaly review table
-
-### Recorded model performance
-
-The XGBoost model was evaluated on a 200-row holdout set.
+Recorded results:
 
 | Metric    | Result |
 | --------- | -----: |
@@ -680,283 +402,531 @@ False Negative = 26
 True Positive   = 65
 ```
 
-The model results are included as analytical evidence rather than as evidence of clinical performance.
+The majority-class baseline accuracy was approximately 0.545.
+
+The model results are presented as analytical model performance for this dataset and holdout split. They should not be interpreted as evidence of clinical effectiveness or generalization to the broader adverse-event reporting population.
 
 ---
 
-# 14. ML Interpretation Guardrails
+# 8. Feature Importance
 
-The model uses reported adverse-event data to predict the dataset's seriousness classification.
+Feature importance was extracted directly from the fitted XGBoost model using the fitted preprocessing pipeline.
 
-The model should therefore be interpreted as a predictive analytics experiment.
-
-It should not be described as:
+The exported dataset contains:
 
 ```text
-predicting patient outcomes
-diagnosing patients
-predicting causal risk
-estimating adverse-event incidence
+feature
+importance
 ```
 
-Feature importance should also be interpreted cautiously.
+The Power BI dashboard displays the top model features using a horizontal bar chart.
 
-For example, a high importance for reporter country is a model/data signal. It does not demonstrate that geography causes seriousness.
+Examples from the recorded model output include:
 
-Potential explanations include differences in:
+```text
+categorical__reportercountry_US
+numeric__reporting_delay_days
+numeric__transmission_year
+numeric__transmission_month
+numeric__reporterqualification
+categorical__reportercountry_DE
+```
 
-* reporting behaviour
-* regulatory processes
-* dataset composition
-* reporting systems
-* sample distribution
+The dashboard uses human-readable display labels while preserving the original model feature names in the underlying data.
 
-Further validation using a larger and more representative dataset would be required before making stronger conclusions.
+### Interpretation guardrail
+
+Feature importance describes the relative contribution of model features to predictions within this fitted model.
+
+It does not establish:
+
+* causality
+* clinical risk
+* incidence
+* mechanism
+* that a country or reporting characteristic causes serious outcomes
+
+The high importance of `reportercountry_US` is treated as a model/data signal requiring further investigation rather than a causal conclusion.
+
+Potential explanations include reporting practices, dataset composition, regulatory processes, or other characteristics of the sampled data.
+
+---
+
+# 9. Isolation Forest Anomaly Screening
+
+Isolation Forest was applied to the ML holdout/test population.
+
+Configuration:
+
+```text
+n_estimators = 200
+contamination = 0.05
+random_state = 42
+n_jobs = -1
+```
+
+Results:
+
+```text
+Records screened: 200
+Anomalies detected: 10
+```
+
+The 10 anomalies are therefore:
+
+```text
+10 / 200 = 5%
+```
+
+consistent with the configured contamination level.
+
+The anomaly output contains:
+
+```text
+safetyreportid
+anomaly_prediction
+anomaly_score
+is_anomaly
+```
+
+The anomaly score is used to order unusual observations for review.
+
+### Interpretation guardrail
+
+Isolation Forest identifies observations with unusual feature patterns relative to the data used by the model.
+
+An anomaly flag does **not** indicate:
+
+* fraud
+* data misconduct
+* causality
+* clinical danger
+* adverse-event validity
+* patient-level risk
+
+Flagged observations are intended for analytical review.
+
+---
+
+# 10. Power BI Semantic Model
+
+The Power BI model uses separate fact tables with conformed dimensions where appropriate.
+
+## Fact tables
+
+### FactCDCStateSurveillance
+
+Grain:
+
+```text
+one row per state and surveillance period
+```
+
+### FactOpenFDAAnalytics
+
+Grain:
+
+```text
+one row per reporter_country and transmission_date
+```
+
+### FactOpenFDAML
+
+Grain:
+
+```text
+one row per safetyreportid/model prediction
+```
+
+### Feature importance
+
+```text
+FACT_OPENFDA_FEATURE_IMPORTANCE
+```
+
+Grain:
+
+```text
+one row per model feature
+```
+
+This is model metadata rather than a transactional fact.
+
+### Anomaly results
+
+```text
+FACT_OPENFDA_ANOMALIES
+```
+
+Grain:
+
+```text
+one row per safetyreportid/anomaly result
+```
+
+The feature-importance and anomaly tables are intentionally not joined to the operational fact tables.
+
+---
+
+# 11. Power BI Dashboard 1 — CDC Public Health Surveillance Analytics
+
+## Purpose
+
+Provide historical public-health surveillance analytics using archived CDC data.
+
+This is an analytical dashboard rather than a live clinical monitoring system.
+
+### KPIs
+
+* Total Cases
+* Total Deaths
+* New Cases
+* States Covered
+
+### Visuals
+
+* Cases and deaths over time
+* Cases by state
+* Deaths by state
+* Selected-state trend
+* State slicer
+* Date-range slicer
+
+### Data interpretation
+
+The CDC dataset is archived historical surveillance data.
+
+The project simulates near-real-time arrival by replaying historical records at an accelerated cadence. It does not represent a genuine real-time CDC feed.
+
+---
+
+# 12. Power BI Dashboard 2 — OpenFDA Surveillance Analytics
+
+## Purpose
+
+Summarize adverse-event reporting volume and reporting patterns.
+
+### KPIs
+
+```text
+Total Reports: 1,000
+Serious Reports: 454
+Serious Report %: 45.4%
+Countries: 34
+```
+
+### Visuals
+
+* Reports over time
+* Reports by reporter country
+* Observed seriousness rate by country
+* Serious vs non-serious reports
+* Date slicer
+* Country slicer
+
+### Interpretation guardrail
+
+OpenFDA/FAERS reports are spontaneous adverse-event reports.
+
+They are subject to reporting and selection biases and cannot by themselves establish causality or estimate adverse-event incidence.
+
+Observed reporting proportions should therefore be presented as descriptive surveillance analytics.
+
+---
+
+# 13. Power BI Dashboard 3 — OpenFDA ML & Anomaly Analytics
+
+## Purpose
+
+Provide a business-facing view of the machine-learning outputs.
+
+Dashboard title:
+
+```text
+OPENFDA ML & ANOMALY ANALYTICS
+```
+
+Subtitle:
+
+```text
+Predictive classification and anomaly screening of FDA adverse-event reports
+```
+
+## KPI cards
+
+```text
+Total Scored       200
+Predicted Serious   65
+Predicted Serious % 32.5%
+Anomalous Reports   10
+```
+
+## Predicted seriousness probability
+
+Display the distribution of predicted seriousness probabilities from the ML holdout predictions.
+
+## Confusion matrix
+
+Display:
+
+```text
+TN = 91
+FP = 18
+FN = 26
+TP = 65
+```
+
+## Holdout Model Performance
+
+Display:
+
+```text
+Accuracy   78.00%
+Precision  78.31%
+Recall     71.43%
+F1         74.71%
+ROC-AUC    87.59%
+PR-AUC     88.03%
+```
+
+These metrics are explicitly labelled as holdout-set model performance.
+
+## XGBoost Feature Importance
+
+Display a horizontal bar chart of the top model features.
+
+Dashboard note:
+
+```text
+Model-derived importance; not evidence of causality.
+```
+
+## Anomaly Screening
+
+Display:
+
+```text
+Anomalous Reports = 10
+```
+
+alongside an anomaly review table containing:
+
+* Report ID
+* Anomaly Score
+* Isolation Forest Prediction
+
+The visual is filtered to:
+
+```text
+is_anomaly = TRUE
+```
+
+and sorted by anomaly score ascending so the most unusual observations appear first.
+
+Dashboard note:
+
+```text
+Isolation Forest identifies observations with unusual feature patterns for review. It does not indicate fraud, causality, or clinical risk.
+```
+
+---
+
+# 14. Power BI Date Slicers
+
+Date slicers use the dedicated date dimension rather than automatically generated date hierarchies.
+
+Recommended configuration:
+
+```text
+DimDate[Date]
+```
+
+Slicer type:
+
+```text
+Between
+```
+
+This provides a calendar-style start/end date selection.
+
+The date column is stored as a true Date data type.
 
 ---
 
 # 15. Data Quality Validation
 
-Day 7 validation includes reconciliation between ingestion, transformation, serving, and reporting layers.
+Day 7 validation includes:
 
-Key checks include:
+## CDC
 
-| Check                                | Expected |
-| ------------------------------------ | -------: |
-| OpenFDA source reports               |    1,000 |
-| OpenFDA Gold rows                    |       78 |
-| OpenFDA countries                    |       34 |
-| Gold report-count sum                |    1,000 |
-| Serious reports                      |      454 |
-| OpenFDA API pagination pages         |        4 |
-| Unique IDs across pagination test    |    4,000 |
-| Duplicate IDs across pagination test |        0 |
+```text
+RAW records:        1,002
+Bronze records:     1,000
+Quarantine records: 1
+```
 
-The purpose of these checks is to ensure that aggregation has not changed the underlying report population unexpectedly.
+The remaining difference represents intentionally injected invalid data and duplicate delivery handling.
+
+## OpenFDA
+
+```text
+ADF API pages:      4
+Reports:            4,000
+Unique report IDs:  4,000
+Duplicate IDs:      0
+```
+
+## OpenFDA Gold
+
+```text
+Gold rows:          78
+Countries:          34
+Total reports:      1,000
+```
+
+## ML
+
+```text
+Holdout records:    200
+Anomalies:          10
+```
+
+The ML anomaly count refers only to the 200-row holdout population and must not be interpreted as 10 anomalies across all 1,000 source reports.
 
 ---
 
-# 16. Scheduled Batch Ingestion
+# 16. Security and Governance
 
-A scheduled Azure Data Factory trigger has been configured:
+The project avoids committing secrets to GitHub.
 
-```text
-TRG_openFDA_Daily
-```
+Controls include:
 
-Configuration:
+* API keys stored outside source-controlled code
+* `.env` excluded through `.gitignore`
+* Azure identity-based access used where supported
+* Synapse external data source configured against ADLS
+* Managed identity used for Synapse access
+* No patient-identifiable information
+* Synthetic/archived public data only
+* ML outputs separated from source data
+* Analytical limitations documented
 
-```text
-Trigger type: Schedule
-Frequency:     Every 1 day
-Time zone:     (UTC+08:00) Kuala Lumpur, Singapore
-```
-
-The trigger separates orchestration logic from execution timing.
-
-The pipeline defines:
-
-```text
-what should happen
-```
-
-while the trigger defines:
-
-```text
-when the pipeline should run
-```
-
-The current raw sink uses the canonical OpenFDA path:
-
-```text
-healthcare/raw/openfda/openfda_adverse_events.json
-```
-
-A future production hardening step could introduce run/date-partitioned raw paths to improve historical retention and rerun traceability.
-
-For this portfolio implementation, the fixed canonical path is retained to keep the architecture simple and reproducible.
+The OpenFDA API key is not stored in the repository.
 
 ---
 
-# 17. Security and Credential Handling
+# 17. Architectural Decisions
 
-The OpenFDA API key is supplied to Azure Data Factory through a dataset parameter.
+## Why Parquet?
 
-The API key is not stored in the GitHub repository.
+Parquet was selected for Silver, Gold, and ML outputs because it provides:
 
-Repository documentation and source code must not contain:
-
-* API keys
-* connection strings
-* storage account keys
-* passwords
-* SAS tokens
-* access tokens
-
-The repository uses placeholders where configuration examples are required.
-
-Example:
-
-```text
-EVENT_HUB_CONNECTION_STRING=
-```
-
-rather than storing an actual credential.
-
----
-
-# 18. Architectural Decisions
-
-## 18.1 Why Parquet?
-
-Parquet is used for Silver, Gold, and ML outputs because it provides:
-
-* columnar storage
 * typed columns
+* columnar storage
 * compression
 * efficient analytical reads
-* compatibility with Synapse Serverless
-* compatibility with Python/Pandas/PyArrow
-* efficient downstream Power BI serving
+* compatibility with Synapse and Python/Pandas
 
----
+## Why calculate percentages in Power BI?
 
-## 18.2 Why Synapse Serverless?
+Additive counts are stored in the serving layer while percentage measures are calculated dynamically in DAX.
 
-Synapse Serverless provides a SQL-based analytical access layer over ADLS without requiring a dedicated SQL pool.
+This prevents incorrect averaging of precomputed percentages when users filter by country or date.
 
-This is appropriate for the portfolio project because the workload is primarily analytical and does not require an always-running dedicated warehouse.
+## Why separate ML and anomaly views?
 
----
-
-## 18.3 Why Calculate Percentages in Power BI?
-
-The Gold layer contains additive counts.
-
-Power BI calculates ratios from those counts:
+The outputs have different grains:
 
 ```text
-Serious Reports / Total Reports
+Predictions
+→ one row per report/model prediction
+
+Anomalies
+→ one row per report/anomaly result
+
+Feature importance
+→ one row per model feature
 ```
 
-rather than averaging precomputed percentages.
+Keeping them separate makes the semantic model clearer.
 
-This ensures that filtering by country, date, or other dimensions produces a context-appropriate percentage.
+## Why use a manual Databricks handoff?
 
----
+The project uses Databricks Free Edition for ML experimentation. The environment does not provide the required arbitrary ADLS Spark configuration for the intended direct external-storage integration.
 
-## 18.4 Why Keep CDC and OpenFDA Facts Separate?
+The project therefore uses a documented manual transfer of final Parquet artifacts into the canonical ADLS ML layer.
 
-The datasets have different business meanings and different grains.
-
-CDC:
-
-```text
-state + surveillance period
-```
-
-OpenFDA:
-
-```text
-reporter country + transmission date
-```
-
-OpenFDA ML:
-
-```text
-safety report + prediction
-```
-
-Combining these into one fact table would create an artificial grain and could produce misleading aggregations.
-
-The semantic model therefore uses independent fact tables with shared dimensions only where a valid relationship exists.
+This is explicitly documented rather than presented as automated production integration.
 
 ---
 
-# 19. Day 7 Status
+# 18. Current Status
 
-### Completed
+Day 7 implementation is complete.
 
-* [x] OpenFDA REST pagination implemented
-* [x] Four-page pagination independently validated
-* [x] 4,000 unique pagination-test reports validated
-* [x] Zero duplicate IDs in pagination test
-* [x] ADF four-page copy successfully executed
-* [x] Canonical OpenFDA RAW path established
-* [x] OpenFDA Gold dataset validated
-* [x] Synapse OpenFDA analytical view created
-* [x] Synapse OpenFDA ML serving view available
-* [x] Daily ADF trigger configured
-* [x] Power BI analytical model designed
-* [x] CDC dashboard design defined
-* [x] OpenFDA dashboard design defined
-* [x] OpenFDA ML dashboard design defined
+Completed:
 
-### In Progress
-
-* [ ] Complete Power BI CDC dashboard
-* [ ] Complete Power BI OpenFDA dashboard
-* [ ] Complete Power BI ML/anomaly dashboard
-* [ ] Validate dashboard KPI totals against Synapse
-* [ ] Capture final dashboard screenshots
-* [ ] Finalize Day 7 documentation after dashboard validation
-
----
-
-# 20. Day 7 Completion Criteria
-
-Day 7 will be considered complete when:
-
-1. The three Power BI dashboards are implemented.
-2. Date and categorical slicers correctly filter the relevant fact tables.
-3. Dashboard KPI totals reconcile with Synapse/source validation.
-4. No accidental fact-to-fact relationships exist.
-5. Percentage measures are calculated from additive counts.
-6. ML metrics shown in Power BI match the recorded model results.
-7. Anomaly results are presented as review candidates rather than definitive conclusions.
-8. Dashboard screenshots are captured for the repository.
-9. Day 7 documentation is updated with final validation results.
+* [x] OpenFDA REST pagination
+* [x] Four-page ingestion validation
+* [x] ADF OpenFDA batch pipeline
+* [x] ADF daily schedule trigger
+* [x] OpenFDA Gold serving
+* [x] Synapse OpenFDA analytics view
+* [x] Synapse ML prediction view
+* [x] Synapse feature-importance view
+* [x] Synapse anomaly view
+* [x] Power BI OpenFDA analytics model
+* [x] Power BI ML prediction model
+* [x] Power BI feature-importance table
+* [x] Power BI anomaly table
+* [x] XGBoost feature-importance visualization
+* [x] Isolation Forest anomaly KPI
+* [x] Anomaly review table
+* [x] ML performance cards
+* [x] Dashboard interpretation guardrails
+* [x] Day 7 data-quality validation
+* [x] Day 7 architectural documentation
 
 ---
 
-# 21. Portfolio Engineering Takeaway
+# 19. Day 7 Completion Criteria
 
-Day 7 demonstrates the transition from data engineering pipelines into an analytical serving layer.
-
-The project now connects:
+Day 7 is considered complete when:
 
 ```text
-Data Sources
-    ↓
-Ingestion
-    ↓
-ADLS Gen2
-    ↓
-Bronze / Silver / Gold
-    ↓
+ADF
+  ↓
+OpenFDA RAW
+  ↓
+Bronze → Silver → Gold
+  ↓
 Synapse Serverless
-    ↓
-Power BI Semantic Model
-    ↓
-Business-facing Analytics
-```
-
-The ML branch extends this architecture:
-
-```text
-OpenFDA Silver
-    ↓
-Feature Engineering
-    ↓
-Databricks ML
-    ↓
-Prediction / Anomaly Outputs
-    ↓
-ADLS ML Layer
-    ↓
-Synapse Serverless
-    ↓
+  ↓
 Power BI
 ```
 
-The key engineering principle is to keep ingestion, transformation, analytical serving, machine learning, and visualization as separate layers with explicit data contracts and validation points.
+and
+
+```text
+Databricks
+  ↓
+ML Parquet outputs
+  ↓
+ADLS ML layer
+  ↓
+Synapse Serverless
+  ↓
+Power BI ML & Anomaly Dashboard
+```
+
+have been validated end-to-end.
+
+The resulting dashboards provide:
+
+1. Historical public-health surveillance analytics
+2. OpenFDA adverse-event reporting analytics
+3. ML prediction diagnostics
+4. Feature-importance interpretation
+5. Anomaly screening for analytical review
+
+The project intentionally avoids presenting model outputs as clinical decisions or causal findings.
