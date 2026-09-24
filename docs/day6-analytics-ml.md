@@ -367,6 +367,8 @@ They do not establish:
 
 The SHAP summary plot was generated in the Databricks ML notebook.
 
+<img width="823" height="940" alt="SHAP" src="https://github.com/user-attachments/assets/ba656950-decb-4388-af82-b43f7adc361a" />
+
 ---
 
 ## 13. Isolation Forest Anomaly Detection
@@ -460,17 +462,18 @@ predicted_probability
 Example records served through Synapse:
 
 ```text
-safetyreportid,actual_serious,predicted_serious,predicted_probability
-10004170,1,1,0.5010936
-10003987,0,0,0.13284644
-10003952,1,0,0.4744376
-10003601,0,0,0.19056003
-10004152,1,1,0.97840196
-10003926,1,0,0.26425228
-10003792,1,1,0.9257659
-10003434,0,0,0.05613183
-10003665,0,0,0.18527436
-10004028,0,0,0.46103808
+|safetyreportid   | actual_serious   | predicted_serious   | predicted_probability   |
+| ----------------| -----------------|---------------------|-----------------------: |
+| 10004170        | 1                | 1                   | 0.5010936               |
+| 10003987        | 0                | 0                   | 0.13284644              |
+| 10003952        | 1                | 0                   | 0.4744376               |
+| 10003601        | 0                | 0                   | 0.19056003              |
+| 10004152        | 1                | 1                   | 0.97840196              |
+| 10003926        | 1                | 0                   | 0.26425228              |
+| 10003792        | 1                | 1                   | 0.9257659               |
+| 10003434        | 0                | 0                   | 0.05613183              |
+| 10003665        | 0                | 0                   | 0.18527436              |
+| 10004028        | 0                | 0                   | 0.46103808              |
 ```
 
 `predicted_probability` represents the XGBoost probability assigned to the positive class (`Serious`).
