@@ -67,9 +67,100 @@ Observed Silver-layer volumes:
 
 The three datasets are combined at the adverse-event report grain for ML feature engineering.
 
+The individual adverse-event report grain is represented by:
+
+```text
+safetyreportid
+```
+
+The reaction and drug datasets are child-level datasets and therefore contain multiple rows per adverse-event report in many cases.
+
 ---
 
-## 3. ML Feature Dataset
+## 3. OpenFDA Gold Analytical Dataset
+
+In addition to the ML feature dataset, the Day 6 OpenFDA pipeline produces an analytical Gold dataset:
+
+```text
+healthcare/gold/openfda/openfda_gold.parquet
+```
+
+This dataset is an aggregated analytical representation of the 1,000 adverse-event reports.
+
+### Gold grain
+
+The grain of the Gold dataset is:
+
+```text
+One row per reporter_country + transmission_date
+```
+
+Therefore, the number of Gold rows is expected to be lower than the number of source adverse-event reports.
+
+Observed Gold-layer validation:
+
+| Validation item                   |                               Result |
+| --------------------------------- | -----------------------------------: |
+| Source adverse-event reports      |                                1,000 |
+| Gold rows                         |                                   78 |
+| Distinct reporter countries       |                                   34 |
+| Gold aggregation grain            | reporter_country + transmission_date |
+| Total reports represented by Gold |                                1,000 |
+
+The 78 Gold rows therefore **do not represent only 78 adverse-event reports**.
+
+Instead, the 1,000 reports are aggregated into 78 country/date groups.
+
+For example, multiple adverse-event reports from the same country and transmission date are represented by a single Gold row with aggregated measures.
+
+### Gold measures
+
+The Gold dataset contains:
+
+```text
+reporter_country
+transmission_date
+adverse_event_reports
+serious_reports
+death_reports
+expedited_reports
+serious_report_pct
+death_report_pct
+expedited_report_pct
+```
+
+The aggregate measures represent counts across the 1,000-report controlled sample.
+
+The principal validation relationship is:
+
+```text
+SUM(adverse_event_reports) = 1,000
+```
+
+while:
+
+```text
+COUNT(Gold rows) = 78
+```
+
+These are different metrics because they operate at different grains.
+
+### Gold analytical purpose
+
+The Gold dataset is intended for descriptive and diagnostic analytics such as:
+
+* adverse-event reporting volume
+* observed reported seriousness proportion
+* reported death-related event counts
+* expedited-report counts
+* reporting-country comparisons
+* reporting trends by transmission date
+
+It is not intended to estimate population incidence, clinical risk, or causal relationships.
+
+---
+
+## 4. ML Feature Dataset
 
 The ML feature transformation is implemented in:
 
@@ -125,7 +216,7 @@ with zero protection for reports without reactions.
 
 ---
 
-## 4. Target Definition
+## 5. Target Definition
 
 The supervised learning target is:
 
@@ -152,9 +243,11 @@ Observed target distribution:
 
 The target is therefore reasonably balanced for this controlled sample.
 
+The 454 serious reports represented in the ML feature dataset are also consistent with the serious-report count represented by the OpenFDA Gold analytical dataset.
+
 ---
 
-## 5. Target Leakage Review
+## 6. Target Leakage Review
 
 Before modelling, fields that could directly expose or strongly encode the target were excluded.
 
@@ -185,7 +278,7 @@ This leakage review was performed before the train/test modelling step.
 
 ---
 
-## 6. Train/Test Design
+## 7. Train/Test Design
 
 The dataset was split into:
 
@@ -214,7 +307,7 @@ The test set was held out for final model evaluation.
 
 ---
 
-## 7. Preprocessing
+## 8. Preprocessing
 
 The model contains both numerical and categorical variables.
 
@@ -231,7 +324,7 @@ This reduces the risk of preprocessing leakage.
 
 ---
 
-## 8. Baseline Model
+## 9. Baseline Model
 
 A majority-class `DummyClassifier` was used as the baseline.
 
@@ -248,7 +341,7 @@ The baseline establishes a simple reference point before evaluating the more com
 
 ---
 
-## 9. XGBoost Model
+## 10. XGBoost Model
 
 The supervised classifier used XGBoost with the following configuration:
 
@@ -282,7 +375,7 @@ These metrics describe performance on this controlled sample only. They should n
 
 ---
 
-## 10. Confusion Matrix
+## 11. Confusion Matrix
 
 The observed confusion matrix was:
 
@@ -311,7 +404,7 @@ This illustrates why accuracy alone is insufficient when evaluating a classifica
 
 ---
 
-## 11. Feature Importance
+## 12. Feature Importance
 
 The XGBoost model's highest feature-importance values were:
 
@@ -348,7 +441,7 @@ A larger and more representative dataset would be required before drawing strong
 
 ---
 
-## 12. SHAP Explainability
+## 13. SHAP Explainability
 
 SHAP was used to examine how individual features contributed to XGBoost predictions.
 
@@ -371,7 +464,7 @@ The SHAP summary plot was generated in the Databricks ML notebook.
 
 ---
 
-## 13. Isolation Forest Anomaly Detection
+## 14. Isolation Forest Anomaly Detection
 
 A separate Isolation Forest model was used for unsupervised anomaly screening.
 
@@ -423,18 +516,17 @@ The Isolation Forest model identified these reports as unusual based on the engi
 |                74 |                   801 |            1 | SE                    |                       1 |                     2 |                 6 |                2018 |                    3 |                   1469 |              3        |                   -1 |     -0.0481415  | True         |
 |                62 |                   801 |            1 | CN                    |                       3 |                     1 |                 1 |                2015 |                    3 |                    379 |              1        |                   -1 |     -0.0407216  | True         |
 |               nan |                       |            2 | COUNTRY NOT SPECIFIED |                       5 |                     3 |                 8 |                2015 |                    5 |                    442 |              2.66667  |                   -1 |     -0.0258868  | True         |
-|                42 |                   801 |            1 | COUNTRY NOT SPECIFIED |                       5 |                     6 |                 1 |                2015 |                    3 |                    379 |              0.166667 |                   -1 |     -0.013714   | True         |
+|                42 |                   801 |            1 | COUNTRY NOT SPECIFIED |                       5 |                     5 |                 1 |                2015 |                    3 |                    379 |              0.166667 |                   -1 |     -0.013714   | True         |
 |               nan |                       |            2 | COUNTRY NOT SPECIFIED |                       5 |                     2 |                 1 |                2015 |                    5 |                    442 |              0.5      |                   -1 |     -0.00812708 | True         |
 |                69 |                   801 |            1 | JP                    |                       3 |                     2 |                 2 |                2015 |                    3 |                    379 |              1        |                   -1 |     -0.00602004 | True         |
 |                68 |                   801 |            2 | AU                    |                       1 |                     7 |                16 |                2014 |                   10 |                    204 |              2.28571  |                   -1 |     -0.00251163 | True         |
-
 ```
 
 An anomaly flag is a **screening signal**, not evidence of an error, fraud, unsafe product, or clinical danger.
 
 ---
 
-## 14. Databricks ML Experimentation
+## 15. Databricks ML Experimentation
 
 The ML workflow was implemented in the Databricks Free Edition notebook:
 
@@ -464,7 +556,7 @@ The notebook is version-controlled as part of the GitHub repository.
 
 ---
 
-## 15. ML Prediction Output
+## 16. ML Prediction Output
 
 The model generated predictions for the 200-row holdout test set.
 
@@ -481,7 +573,7 @@ Example records served through Synapse:
 
 ```text
 |safetyreportid   | actual_serious   | predicted_serious   | predicted_probability   |
-| ----------------| -----------------|---------------------|-----------------------: |
+| ----------------| -----------------| ---------------------|-----------------------: |
 | 10004170        | 1                | 1                   | 0.5010936               |
 | 10003987        | 0                | 0                   | 0.13284644              |
 | 10003952        | 1                | 0                   | 0.4744376               |
@@ -500,7 +592,7 @@ The probability is a model output and has not been calibrated as a production ri
 
 ---
 
-## 16. ADLS ML Layer
+## 17. ADLS ML Layer
 
 The ML prediction output is stored in the ADLS ML layer:
 
@@ -530,7 +622,7 @@ which allows downstream analytical systems to consume model outputs without requ
 
 ---
 
-## 17. Synapse Serverless Serving Layer
+## 18. Synapse Serverless Serving Layer
 
 Synapse Serverless SQL reads the ML prediction Parquet from ADLS.
 
@@ -574,49 +666,208 @@ Power BI
 
 ---
 
-## 18. Power BI Foundation
+## 19. OpenFDA Analytical Serving Layer
 
-Power BI consumes the Synapse serving view rather than connecting directly to the Databricks notebook.
+The OpenFDA Gold analytical dataset is also intended to be exposed through Synapse Serverless for Power BI consumption.
 
-The intended ML analytics page contains:
+The planned serving view is:
 
-### KPI
+```text
+dbo.vw_openfda_analytics
+```
 
-Total ML prediction records.
+The view will expose the Gold analytical grain:
 
-### KPI
+```text
+reporter_country + transmission_date
+```
 
-Predicted serious reports.
+with:
 
-### KPI
+```text
+reporter_country
+transmission_date
+adverse_event_reports
+serious_reports
+death_reports
+expedited_reports
+serious_report_pct
+death_report_pct
+expedited_report_pct
+```
 
-Predicted serious percentage.
+The serving architecture is:
 
-### Comparison
+```text
+ADLS Gold
+      ↓
+Synapse Serverless
+      ↓
+dbo.vw_openfda_analytics
+      ↓
+Power BI
+```
 
-Actual serious classification versus predicted serious classification.
+This analytical view is separate from:
 
-### Distribution
+```text
+dbo.vw_openfda_ml_predictions
+```
 
-Distribution of `predicted_probability`.
-
-The dashboard is intended for analytical exploration rather than clinical decision-making.
+because the two datasets have different grains and serve different analytical purposes.
 
 ---
 
-## 19. Data Quality and Validation
+## 20. Power BI Foundation
 
-Day 6 validation covers:
+Power BI consumes the Synapse serving layer rather than connecting directly to the Databricks notebook.
 
-### Dataset validation
+The planned semantic model separates analytical facts by grain.
 
-* 1,000 input adverse-event reports
+### CDC analytical fact
+
+```text
+FactCDCStateSurveillance
+```
+
+Grain:
+
+```text
+One row per state and surveillance period
+```
+
+### OpenFDA analytical fact
+
+```text
+FactOpenFDAAnalytics
+```
+
+Grain:
+
+```text
+One row per reporter_country and transmission_date
+```
+
+### OpenFDA ML fact
+
+```text
+FactOpenFDAML
+```
+
+Grain:
+
+```text
+One row per safetyreportid/model prediction
+```
+
+Shared/conformed dimensions can include:
+
+```text
+DimDate
+DimCountry
+```
+
+The CDC fact uses a state dimension:
+
+```text
+DimState
+```
+
+The conceptual Power BI model is:
+
+```text
+DimDate
+   │
+   ├──────────── FactCDCStateSurveillance
+   │
+   ├──────────── FactOpenFDAAnalytics
+   │
+   └──────────── FactOpenFDAML
+
+
+DimCountry
+   │
+   ├──────────── FactOpenFDAAnalytics
+   │
+   └──────────── FactOpenFDAML
+
+
+DimState
+   │
+   └──────────── FactCDCStateSurveillance
+```
+
+The fact tables are kept separate because they represent different business grains.
+
+The model therefore avoids directly joining unrelated fact tables together.
+
+### Planned OpenFDA analytical page
+
+The OpenFDA analytical dashboard is intended to answer:
+
+* How many adverse-event reports are represented in the analytical snapshot?
+* How does reporting volume vary over time?
+* Which reporting countries contribute the most reports?
+* How does the observed reported seriousness proportion vary by country?
+* How do death-related and expedited-report counts vary across the reporting population?
+
+### Planned OpenFDA ML page
+
+The OpenFDA ML dashboard is intended to answer:
+
+* How many reports were scored by the model?
+* How are predicted probabilities distributed?
+* How do actual and predicted classifications compare?
+* Where are false positives and false negatives occurring?
+* Which features contributed most to model predictions?
+* Which reports were flagged as unusual by Isolation Forest?
+
+The dashboards are intended for analytical exploration rather than clinical decision-making.
+
+---
+
+## 21. Data Quality and Validation
+
+Day 6 validation covers the OpenFDA pipeline at multiple grains.
+
+### Source/Silver validation
+
+* 1,000 adverse-event reports
 * 2,749 reaction records
 * 3,079 drug records
-* 1,000 ML feature rows
 * no duplicate adverse-event IDs in the Silver event dataset
+
+### Gold analytical validation
+
+* 78 Gold rows
+* 34 distinct reporter countries
+* Gold grain = `reporter_country + transmission_date`
+* 1,000 source reports represented by the Gold aggregation
+* `SUM(adverse_event_reports) = 1,000`
+* 454 serious reports represented in the controlled population
+* Gold row count is intentionally lower than the source report count because the Gold table is aggregated
+
+The relationship between the datasets is therefore:
+
+```text
+1,000 adverse-event reports
+          ↓
+   aggregation by
+reporter_country + transmission_date
+          ↓
+78 Gold analytical rows
+          ↓
+34 distinct reporter countries
+```
+
+This is an expected aggregation result rather than a data-loss condition.
+
+### ML feature validation
+
+* 1,000 ML feature rows
 * target has no null values
 * feature-level missingness is retained and handled during modelling
+* target distribution = 546 not serious / 454 serious
 
 ### Model validation
 
@@ -636,11 +887,12 @@ Day 6 validation covers:
 * ML prediction Parquet written to ADLS ML layer
 * Synapse Serverless reads the Parquet
 * `dbo.vw_openfda_ml_predictions` exposes the model output
-* Power BI can consume the Synapse serving layer
+* Power BI can consume the Synapse ML serving layer
+* OpenFDA Gold data is available for analytical serving through the planned `dbo.vw_openfda_analytics` view
 
 ---
 
-## 20. Automated Repository Tests
+## 22. Automated Repository Tests
 
 Day 6 adds:
 
@@ -667,35 +919,16 @@ The repository also continues to use Python compilation validation:
 python -m compileall ingestion scripts transformations
 ```
 
----
-
-## 21. Testing Limitation
-
-The local Cloud Shell environment used for the final repository validation did not have the `pytest` executable available in the active shell session at the time of documentation.
-
-Python source compilation completed successfully:
+Final local repository validation completed successfully:
 
 ```text
-python -m compileall ingestion scripts transformations
-```
-
-The Day 6 test file is therefore designed as a lightweight repository/artefact test and should be executed after activating the project's Python environment where `pytest` is installed.
-
-Expected command:
-
-```bash
 pytest -q
-```
-
-or, when using the project virtual environment:
-
-```bash
-.venv/bin/pytest -q
+10 passed in 0.05s
 ```
 
 ---
 
-## 22. Reproducibility
+## 23. Reproducibility
 
 The ML workflow is version-controlled through:
 
@@ -712,9 +945,11 @@ The transformation script creates the reusable ML feature dataset.
 
 The ADLS ML layer stores the ML feature and prediction outputs used by downstream serving.
 
+The OpenFDA Gold analytical dataset is stored separately from the ML feature and prediction datasets because it serves a different analytical grain.
+
 ---
 
-## 23. Important Analytical Limitations
+## 24. Important Analytical Limitations
 
 The openFDA adverse-event reporting data has important limitations.
 
@@ -742,9 +977,11 @@ The ML model therefore demonstrates an engineering and analytical workflow rathe
 
 The 1,000-record controlled sample is also insufficient for production deployment or claims about generalisation.
 
+The 78-row Gold analytical dataset is an aggregation of the 1,000-report population and should not be interpreted as an independent 78-record sample.
+
 ---
 
-## 24. Engineering Outcome
+## 25. Engineering Outcome
 
 Day 6 demonstrates the transition from a lakehouse data platform into an ML-enabled analytical workflow.
 
@@ -760,24 +997,25 @@ ADLS RAW
 Bronze
     ↓
 Silver
-    ↓
-ML feature engineering
-    ↓
-Databricks ML experimentation
-    ↓
-XGBoost classification
-    ↓
-Isolation Forest anomaly screening
-    ↓
-SHAP explainability
-    ↓
-ML predictions
-    ↓
-ADLS ML layer
-    ↓
-Synapse Serverless
-    ↓
-Power BI
+    ├───────────────────┐
+    ↓                   ↓
+Gold analytical      ML feature
+    ↓                   ↓
+Synapse             Databricks ML
+    ↓                   ↓
+Power BI            XGBoost
+                        ↓
+                  Isolation Forest
+                        ↓
+                       SHAP
+                        ↓
+                  ML predictions
+                        ↓
+                    ADLS ML
+                        ↓
+                  Synapse Serverless
+                        ↓
+                     Power BI
 ```
 
 The implementation demonstrates separation of:
@@ -786,6 +1024,7 @@ The implementation demonstrates separation of:
 * storage
 * transformation
 * feature engineering
+* analytical aggregation
 * model experimentation
 * model outputs
 * SQL serving
@@ -795,11 +1034,16 @@ The Databricks Free Edition environment imposes limitations on direct external c
 
 ---
 
-## 25. Day 6 Completion Criteria
+## 26. Day 6 Completion Criteria
 
 Day 6 is considered complete when the following are version-controlled and validated:
 
 * [x] OpenFDA Silver datasets available
+* [x] OpenFDA Gold analytical dataset generated
+* [x] OpenFDA Gold grain documented
+* [x] OpenFDA Gold row-count validation documented
+* [x] OpenFDA Gold country-count validation documented
+* [x] OpenFDA Gold aggregate reconciled to 1,000 source reports
 * [x] ML feature transformation implemented
 * [x] ML feature dataset generated
 * [x] Target and leakage controls documented
@@ -813,21 +1057,33 @@ Day 6 is considered complete when the following are version-controlled and valid
 * [x] MLflow experiment tracking attempted/completed in Databricks
 * [x] ML prediction output generated
 * [x] ML prediction output available in ADLS ML layer
-* [x] Synapse Serverless serving view created
+* [x] Synapse Serverless ML serving view created
 * [x] Power BI serving foundation established
 * [x] Databricks notebook exported to GitHub
 * [x] Day 6 repository test added
 * [x] Python compilation validation completed
-* [ ] Final pytest execution completed in the project Python environment
-* [ ] Git commit and push completed
+* [x] Final pytest execution completed
+* [ ] Final Day 6 documentation commit/push completed
 
 ---
 
-## 26. Day 6 Portfolio Positioning
+## 27. Day 6 Portfolio Positioning
 
 The project should be described as:
 
-> A cloud data engineering and analytics pipeline that ingests public-health and adverse-event data into Azure ADLS Gen2, applies medallion transformations, engineers ML features, performs supervised and unsupervised ML experimentation in Databricks, and serves ML outputs through Synapse Serverless for Power BI analytics.
+> A cloud data engineering and analytics pipeline that ingests public-health and adverse-event data into Azure ADLS Gen2, applies medallion transformations, engineers ML features, performs supervised and unsupervised ML experimentation in Databricks, and serves analytical and ML outputs through Synapse Serverless for Power BI analytics.
+
+The OpenFDA component demonstrates two complementary analytical grains:
+
+```text
+Adverse-event report grain
+        ↓
+ML feature engineering and prediction
+
+Country + transmission-date grain
+        ↓
+Analytical Gold reporting
+```
 
 The ML component demonstrates:
 
