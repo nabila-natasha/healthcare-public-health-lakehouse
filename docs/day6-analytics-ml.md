@@ -412,6 +412,24 @@ is_anomaly
 
 The lowest anomaly scores observed in the test sample included reports with unusual combinations of reporting delay, drug/reaction counts, age information, reporter country, and other features.
 
+The Isolation Forest model identified these reports as unusual based on the engineered feature distribution. An `anomaly_prediction` of `-1` indicates an anomalous observation.
+
+```text
+|   patientonsetage |   patientonsetageunit |   patientsex | reportercountry       |   reporterqualification |   number_of_reactions |   number_of_drugs |   transmission_year |   transmission_month |   reporting_delay_days |   drug_reaction_ratio |   anomaly_prediction |   anomaly_score | is_anomaly   |
+|------------------:|----------------------:|-------------:|:----------------------|------------------------:|----------------------:|------------------:|--------------------:|---------------------:|-----------------------:|----------------------:|---------------------:|----------------:|:-------------|
+|               nan |                       |            2 | COUNTRY NOT SPECIFIED |                       5 |                     4 |                 2 |                2018 |                    3 |                   1469 |              0.5      |                   -1 |     -0.0854261  | True         |
+|                38 |                   801 |            1 | GB                    |                       3 |                    10 |                 3 |                2016 |                    3 |                    723 |              0.3      |                   -1 |     -0.0504328  | True         |
+|               nan |                       |          nan | US                    |                       5 |                     2 |                 8 |                2018 |                    5 |                   1518 |              4        |                   -1 |     -0.0490109  | True         |
+|                74 |                   801 |            1 | SE                    |                       1 |                     2 |                 6 |                2018 |                    3 |                   1469 |              3        |                   -1 |     -0.0481415  | True         |
+|                62 |                   801 |            1 | CN                    |                       3 |                     1 |                 1 |                2015 |                    3 |                    379 |              1        |                   -1 |     -0.0407216  | True         |
+|               nan |                       |            2 | COUNTRY NOT SPECIFIED |                       5 |                     3 |                 8 |                2015 |                    5 |                    442 |              2.66667  |                   -1 |     -0.0258868  | True         |
+|                42 |                   801 |            1 | COUNTRY NOT SPECIFIED |                       5 |                     6 |                 1 |                2015 |                    3 |                    379 |              0.166667 |                   -1 |     -0.013714   | True         |
+|               nan |                       |            2 | COUNTRY NOT SPECIFIED |                       5 |                     2 |                 1 |                2015 |                    5 |                    442 |              0.5      |                   -1 |     -0.00812708 | True         |
+|                69 |                   801 |            1 | JP                    |                       3 |                     2 |                 2 |                2015 |                    3 |                    379 |              1        |                   -1 |     -0.00602004 | True         |
+|                68 |                   801 |            2 | AU                    |                       1 |                     7 |                16 |                2014 |                   10 |                    204 |              2.28571  |                   -1 |     -0.00251163 | True         |
+
+```
+
 An anomaly flag is a **screening signal**, not evidence of an error, fraud, unsafe product, or clinical danger.
 
 ---
