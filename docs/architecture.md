@@ -2,38 +2,49 @@
 
 ## 1. Architecture Overview
 
-This project implements a healthcare and public-health analytics platform combining:
+This project implements a healthcare/public-health analytics platform combining:
 
-* Batch ingestion
-* Simulated streaming ingestion
-* Cloud data-lake storage
-* Medallion data processing
-* Data-quality validation
-* SQL-based analytical serving
-* Business intelligence
-* Machine learning
-* Infrastructure-as-code foundations
+* batch ingestion
+* simulated streaming ingestion
+* cloud data-lake storage
+* data-quality validation
+* medallion-style transformation
+* SQL serving
+* business intelligence
+* machine learning
+* infrastructure-as-code foundations
 * CI/CD validation
 
-The architecture separates ingestion, orchestration, storage, transformation, data quality, analytical serving, business intelligence, and machine learning responsibilities.
+The architecture intentionally separates:
 
-The design intentionally reflects the capabilities and constraints of the selected Azure and Databricks environments.
+* ingestion
+* orchestration
+* storage
+* data quality
+* transformation
+* SQL serving
+* business intelligence
+* machine learning
+* infrastructure provisioning
+* application/code validation
 
-The project uses public openFDA data and synthetic/historical public-health data. It does not use PHI or patient-identifiable clinical records.
+Each component has a defined responsibility so that the platform can be extended without making one service responsible for the entire data lifecycle.
+
+The project uses only public and synthetic data. No PHI is used.
 
 ---
 
 ## 2. High-Level Architecture
 
 ```text
-                         BUSINESS REQUIREMENTS
+                         PUBLIC / SYNTHETIC DATA
                                   │
                     ┌─────────────┴──────────────┐
                     │                            │
                     ▼                            ▼
              BATCH INGESTION              STREAM INGESTION
-               openFDA API                Historical CDC data
-                    │                     accelerated replay
+               openFDA API               Historical CDC replay
+                    │                     accelerated cadence
                     ▼                            │
                    ADF                           ▼
              REST / HTTP                    Event Hubs
@@ -45,8 +56,9 @@ The project uses public openFDA data and synthetic/historical public-health data
                                             ADLS RAW
                     │                            │
                     └─────────────┬──────────────┘
+                                  │
                                   ▼
-                         DATA QUALITY VALIDATION
+                         DATA QUALITY CONTROLS
                                   │
                      ┌────────────┴────────────┐
                      │                         │
@@ -59,48 +71,59 @@ The project uses public openFDA data and synthetic/historical public-health data
                      ▼
                    GOLD
                      │
-             ┌───────┴────────┐
-             │                │
-             ▼                ▼
-      Synapse Serverless   ML-ready data
-             │                │
-             ▼                ▼
-        Power BI       Databricks Free Edition
-                              │
-                              ▼
-                         ML predictions
-                         Feature importance
-                         Anomalies
-                              │
-                       controlled handoff
-                              │
-                              ▼
-                         ADLS ML layer
-                              │
-                              ▼
-                      Synapse Serverless
-                              │
-                              ▼
-                          Power BI
+             ┌───────┴──────────────┐
+             │                      │
+             ▼                      ▼
+      Synapse Serverless       ML Feature Layer
+             │                      │
+             │                      ▼
+             │              Databricks Free Edition
+             │                      │
+             │             ┌────────┴────────┐
+             │             │                 │
+             │             ▼                 ▼
+             │        XGBoost ML       Isolation Forest
+             │             │                 │
+             │             └────────┬────────┘
+             │                      │
+             │                      ▼
+             │                 ML Outputs
+             │                      │
+             │              Manual ADLS Handoff
+             │                      │
+             │                      ▼
+             └──────────────► Synapse Serverless
+                                    │
+                                    ▼
+                                 Power BI
+
+
+        ┌──────────────────────────────────────────┐
+        │ Supporting Engineering Controls          │
+        │                                          │
+        │ GitHub Actions CI/CD                     │
+        │ pytest / validation tests                │
+        │ Terraform IaC foundation                 │
+        │ Security & governance controls            │
+        │ Architecture Decision Records             │
+        └──────────────────────────────────────────┘
 ```
-
-The Azure data-engineering path remains independent of Databricks Free Edition.
-
-Databricks is used as a separate ML execution environment because the selected Free Edition environment does not provide the same Azure storage connectivity model as a provisioned Azure Databricks deployment.
 
 ---
 
-## 3. Azure Infrastructure
+# 3. Azure Infrastructure
 
-### 3.1 Resource Group
+## 3.1 Resource Group
 
 ```text
 rg-lakehouse-portfolio
 ```
 
-The resource group provides the logical boundary for the project's Azure resources.
+The resource group provides the logical Azure boundary for the project environment.
 
-### 3.2 ADLS Gen2
+---
+
+## 3.2 Azure Data Lake Storage Gen2
 
 Primary project storage:
 
@@ -108,21 +131,39 @@ Primary project storage:
 stlakehousebello
 ```
 
-The project uses the `healthcare` filesystem:
+Filesystem:
+
+```text
+healthcare/
+```
+
+Canonical project structure:
 
 ```text
 healthcare/
 ├── raw/
+│   ├── cdc/
+│   └── openfda/
 ├── bronze/
+│   ├── cdc/
+│   └── openfda/
 ├── silver/
+│   ├── cdc/
+│   └── openfda/
 ├── gold/
+│   ├── cdc/
+│   └── openfda/
 ├── quarantine/
+│   └── cdc/
 └── ml/
+    └── openfda/
 ```
 
-ADLS Gen2 acts as the canonical storage boundary for the Azure data-engineering pipeline.
+ADLS Gen2 provides the common storage boundary for ingestion, transformation outputs, analytical datasets and ML outputs.
 
-### 3.3 Event Hubs
+---
+
+## 3.3 Azure Event Hubs
 
 Namespace:
 
@@ -138,14 +179,19 @@ healthcare-events
 
 Configuration used by the project:
 
-* Standard tier
-* Four partitions
-* Seven-day message retention
-* Kafka-compatible interface
+```text
+Partitions: 4
+Retention: 7 days
+Protocol: Kafka-compatible interface
+```
 
-Event Hubs provides the streaming ingestion endpoint for the historical CDC replay workload.
+Event Hubs provides the streaming ingestion endpoint.
 
-### 3.4 Azure Data Factory
+The project uses the Kafka-compatible interface to demonstrate interoperability with Python Kafka tooling without introducing a separate Kafka cluster.
+
+---
+
+## 3.4 Azure Data Factory
 
 Factory:
 
@@ -153,23 +199,36 @@ Factory:
 adf-lakehouse-bello
 ```
 
-ADF is used for batch ingestion and cloud orchestration.
+Azure Data Factory is used for **batch ingestion orchestration**.
 
 The implemented openFDA pipeline uses:
 
 ```text
 openFDA REST API
-       │
-       ▼
-ADF REST / HTTP
-       │
-       ▼
-ADLS RAW
+       ↓
+ADF REST dataset
+       ↓
+Parameterized pagination
+       ↓
+ADLS Gen2 RAW
 ```
 
-The pipeline includes parameterized API pagination and writes the resulting data to the canonical RAW layer.
+ADF responsibilities include:
 
-### 3.5 Synapse Serverless
+* REST API connectivity
+* parameterized pagination
+* batch ingestion orchestration
+* scheduling
+* pipeline execution monitoring
+* source-to-RAW movement
+
+ADF does not currently orchestrate the full downstream transformation and ML lifecycle.
+
+Python and Databricks are used separately for transformation and ML workloads.
+
+---
+
+## 3.5 Synapse Serverless
 
 Workspace:
 
@@ -177,87 +236,106 @@ Workspace:
 syn-lakehouse-bello
 ```
 
-Synapse Serverless SQL provides SQL-based access to files stored in ADLS.
+Database:
 
-The project uses a serverless SQL model rather than a continuously provisioned Dedicated SQL Pool.
+```text
+healthcare_analytics
+```
+
+Synapse Serverless SQL provides SQL-based access to analytical files stored in ADLS.
+
+A Dedicated SQL Pool is intentionally not used.
+
+The project uses Synapse Serverless to expose analytical and ML outputs without introducing a continuously running dedicated warehouse.
 
 ---
 
 # 4. Data Ingestion
 
-## 4.1 Batch Ingestion — openFDA
+## 4.1 openFDA Batch Ingestion
 
-The openFDA adverse-event API is ingested using Azure Data Factory.
+The project uses the public openFDA adverse-event API as a batch source.
 
-Implemented flow:
+The implemented ingestion architecture is:
 
 ```text
 openFDA API
-     │
-     ▼
-ADF REST / HTTP
-     │
-     ▼
-ADLS RAW
-     │
-     ▼
-Bronze
-     │
-     ▼
-Silver
-     │
-     ▼
-Gold
+     ↓
+Azure Data Factory
+     ↓
+Parameterized REST pagination
+     ↓
+ADLS Gen2 RAW
 ```
 
-The final ADF ingestion validated four paginated API responses containing:
+The ADF pipeline uses four API pages during the demonstrated ingestion run:
 
-* 4,000 adverse-event reports
-* 4,000 unique `safetyreportid` values
-* Zero duplicate report IDs in the validation sample
+```text
+skip=0
+skip=1000
+skip=2000
+skip=3000
+```
 
-The ADF pipeline uses parameterized pagination rather than treating the API as a single unbounded request.
+Validation of the four-page test produced:
 
-The RAW layer preserves the ingested source response before transformation.
+```text
+API response pages:       4
+Total reports:            4,000
+Unique safetyreportid:    4,000
+Duplicate reports:        0
+First safetyreportid:     5801206-7
+Last safetyreportid:      10007321
+```
+
+The final ADF copy activity produced one combined RAW JSON file.
+
+The `rowsRead=4` value from the ADF activity output represents the four paginated API responses, not four individual adverse-event reports.
+
+The ADF pipeline also has a daily scheduled trigger configured for the Kuala Lumpur/Singapore timezone.
+
+The current sink uses a fixed RAW filename; future production hardening could introduce run- or date-partitioned output paths to prevent scheduled runs from overwriting a previous snapshot.
 
 ---
 
-## 4.2 Streaming Ingestion — Historical CDC Replay
+## 4.2 CDC Historical Streaming Replay
 
-The streaming workload uses the archived CDC dataset:
+The streaming workload uses the archived public CDC dataset:
 
 ```text
 Weekly United States COVID-19 Cases and Deaths by State - ARCHIVED
 Dataset ID: pwn4-m3yp
 ```
 
-The source is historical rather than genuinely real-time.
+The original dataset is historical and discontinued.
 
-Historical records are replayed at an accelerated cadence to simulate near-real-time event arrival.
+Therefore, this project does **not** describe the source as a live CDC feed.
 
-Implemented flow:
+Instead:
+
+> Historical public-health surveillance data is replayed at an accelerated cadence to simulate near-real-time event arrival, while preserving event-time and ingestion-time metadata and injecting synthetic faults for validation.
+
+The flow is:
 
 ```text
 CDC historical fixture
-        │
-        ▼
+        ↓
 Python replay producer
-        │
-        ▼
-Azure Event Hubs
+        ↓
 Kafka protocol
-        │
-        ▼
+        ↓
+Azure Event Hubs
+        ↓
 Python consumer
-        │
-        ▼
+        ↓
 ADLS RAW
-        │
-        ▼
-Bronze
+        ↓
+Validation
+        ├── Bronze
+        └── Quarantine
 ```
 
-Each event preserves:
+The streaming event envelope contains:
 
 ```text
 event_id
@@ -268,57 +346,50 @@ source_dataset_id
 payload
 ```
 
-The replay workload also injects controlled faults to validate the pipeline, including duplicate delivery and malformed events.
-
-The final Day 4 validation recorded:
+The `event_id` is deterministically generated from:
 
 ```text
-RAW events:          1002
-Bronze events:       1000
-Quarantined events:     1
+state | start_date | end_date
 ```
 
-Invalid records are not allowed to silently enter the accepted Bronze dataset.
+using SHA-256.
+
+This allows the same business event to produce the same identifier when delivered more than once.
 
 ---
 
-# 5. Data Lake Layers
+# 5. Data Lake Medallion Layers
 
-The project follows a medallion-style architecture.
+The project uses a Raw → Bronze → Silver → Gold pattern, with a separate ML output layer.
 
-## 5.1 Raw
+---
 
-The RAW layer preserves source data with minimal modification.
+## 5.1 RAW
+
+The RAW layer preserves source-oriented data before analytical transformation.
 
 Purpose:
 
-* Source preservation
-* Traceability
-* Replayability
-* Ingestion auditing
-
-```text
-healthcare/raw/
-```
+* source preservation
+* traceability
+* replayability
+* auditability
+* recovery from downstream transformation errors
 
 Examples:
 
 ```text
-healthcare/raw/openfda/openfda_adverse_events.json
-healthcare/raw/cdc/<replay-run>/
+healthcare/raw/openfda/
+healthcare/raw/cdc/
 ```
 
 ---
 
-## 5.2 Bronze
+## 5.2 BRONZE
 
-Bronze contains validated ingestion outputs prepared for downstream processing.
+Bronze contains validated ingestion outputs prepared for downstream transformation.
 
-```text
-healthcare/bronze/
-```
-
-For streaming data, the event envelope preserves operational metadata such as:
+For the CDC streaming workload, accepted events retain important operational metadata:
 
 ```text
 event_id
@@ -329,108 +400,165 @@ source_dataset_id
 payload
 ```
 
-Duplicate event IDs and malformed records are handled according to the pipeline validation rules.
+Malformed events are not promoted into Bronze.
 
 ---
 
-## 5.3 Silver
+## 5.3 QUARANTINE
 
-Silver contains cleaned and standardized records.
+Invalid records are separated from accepted records.
 
-Typical processing includes:
-
-* Schema normalization
-* Type conversion
-* Null handling
-* Duplicate handling
-* Standardization
-* Derived fields
-* Data-quality validation
-
-The project uses Parquet for Silver datasets.
-
-Examples include:
+Example:
 
 ```text
-healthcare/silver/openfda/
-healthcare/silver/cdc/
+healthcare/quarantine/cdc/
 ```
+
+The final CDC replay validation produced:
+
+```text
+RAW events:          1,002
+Bronze events:       1,000
+Quarantined events:      1
+```
+
+The quarantined event failed validation because the required `event_time` field was missing.
+
+A duplicate delivery was also intentionally injected during the replay workload. Deterministic event IDs allow duplicate business events to be identified separately from malformed records.
 
 ---
 
-## 5.4 Gold
+## 5.4 SILVER
 
-Gold contains curated analytical datasets with explicitly defined grains and metrics.
+Silver contains cleaned and standardized datasets.
+
+Processing includes:
+
+* schema normalization
+* type conversion
+* null handling
+* duplicate handling
+* standardization
+* derived fields
+* business-rule validation
+
+CDC Silver:
 
 ```text
-healthcare/gold/
+1,000 rows
+15 columns
 ```
 
-Examples include:
+with deduplication based on `event_id`.
+
+OpenFDA Silver consists of separate analytical entities:
 
 ```text
-healthcare/gold/openfda/openfda_gold.parquet
-healthcare/gold/cdc/
+adverse_events.parquet
+adverse_event_reactions.parquet
+adverse_event_drugs.parquet
 ```
 
-Gold datasets are designed for analytical consumption rather than simply copying Silver data.
+Recorded outputs:
+
+```text
+adverse_events:          1,000 rows × 17 columns
+adverse_event_reactions: 2,749 rows × 4 columns
+adverse_event_drugs:     3,079 rows × 13 columns
+```
+
+No duplicate `safetyreportid` values were present in the validated adverse-event report dataset.
 
 ---
 
-## 5.5 Quarantine
+## 5.5 GOLD
 
-Records that fail validation are separated from accepted records.
+Gold contains curated analytical datasets with explicitly defined grains.
+
+CDC Gold:
 
 ```text
-healthcare/quarantine/
+1,000 rows
+11 columns
+60 states
 ```
 
-This prevents malformed or invalid records from silently entering downstream analytical datasets.
+The CDC analytical layer includes derived measures such as case/death relationships while preserving the distinction between event-time and ingestion-time processing.
 
-The CDC streaming workload demonstrated this pattern using a malformed event with a missing required `event_time`.
+OpenFDA Gold:
+
+```text
+78 rows
+9 columns
+34 reporter countries
+1,000 total reports
+```
+
+The OpenFDA Gold grain is:
+
+```text
+reporter_country + transmission_date
+```
+
+The dataset contains analytical measures including:
+
+* adverse-event report counts
+* serious-report counts
+* death-report counts
+* expedited-report counts
+* serious-report percentage
+* death-report percentage
+* expedited-report percentage
+
+These are descriptive reporting metrics and are not interpreted as causal measures of drug safety.
 
 ---
 
-## 5.6 ML
+# 6. Transformation Architecture
 
-The ML layer stores model-related datasets and outputs.
+Transformations are implemented primarily in Python using Pandas and PyArrow.
 
-```text
-healthcare/ml/openfda/
-```
-
-Current outputs include:
+Key transformation modules include:
 
 ```text
-openfda_ml_features.parquet
-openfda_ml_predictions.parquet
-openfda_feature_importance.parquet
-openfda_anomalies.parquet
+transformations/
+├── silver/
+│   ├── cdc_bronze_to_silver.py
+│   └── openfda_bronze_to_silver.py
+├── gold/
+│   ├── cdc_silver_to_gold.py
+│   └── openfda_silver_to_gold.py
+└── ml/
+    └── openfda_features.py
 ```
 
-These outputs are analytical model artifacts and are not treated as clinical decisions.
+Parquet is used for analytical outputs because it provides:
+
+* typed columns
+* columnar storage
+* compression
+* efficient analytical reads
+* interoperability across Python, Spark/Databricks and SQL-serving tools
 
 ---
 
-# 6. Data Quality
+# 7. Data Quality Architecture
 
-Data quality is treated as a pipeline control rather than an afterthought.
+Data quality is treated as an engineering control rather than an afterthought.
 
-Validation is implemented through both transformation-level checks and automated repository tests.
+Validation exists at multiple levels.
 
-Key controls include:
+## Streaming validation
 
-* Required-field validation
-* Schema validation
-* Timestamp validation
-* Duplicate detection
-* Event ID validation
-* Source metadata validation
-* Gold-grain validation
-* Source-to-target reconciliation
-* OpenFDA report ID uniqueness
-* ML target validation
-* ML leakage exclusion checks
+The CDC streaming path validates:
+
+* required event fields
+* event ID presence
+* timestamp presence
+* schema conformity
+* duplicate business identifiers
+* source metadata
+* quarantine conditions
 
 Conceptually:
 
@@ -447,219 +575,166 @@ Conceptually:
                Bronze   Quarantine
 ```
 
-The CDC event ID is deterministic.
+---
 
-It is generated from:
+## Repository-level validation
 
-```text
-state|start_date|end_date
-```
+The repository contains automated tests covering areas such as:
 
-using SHA-256.
+* deterministic event ID generation
+* required CDC fields
+* null validation
+* event ID uniqueness
+* duplicate detection
+* CDC Gold grain
+* Silver-to-Gold reconciliation
+* OpenFDA `safetyreportid` uniqueness
+* ML target validity
+* ML leakage controls
+* serving-layer documentation
 
-This allows repeated delivery of the same business event to be identified by the same event ID while preserving a separate `ingestion_time`.
+The full local test suite passed during Day 8 validation.
 
 ---
 
-# 7. Transformation Architecture
+# 8. Synapse Serverless Serving Layer
 
-The project uses Python and Pandas/PyArrow for the primary local transformation workflows.
+Synapse Serverless provides SQL-based access to analytical files in ADLS.
 
-The transformation path is:
+The project uses a managed identity for the Synapse workspace to access the project storage boundary.
+
+The serving database is:
 
 ```text
-Bronze
-  │
-  ▼
-Python transformation
-  │
-  ▼
-Silver
-  │
-  ▼
-Python transformation
-  │
-  ▼
-Gold
+healthcare_analytics
 ```
 
-Key transformation modules include:
+Important views include:
 
 ```text
-transformations/
-├── silver/
-│   ├── cdc_bronze_to_silver.py
-│   └── openfda_bronze_to_silver.py
-├── gold/
-│   ├── cdc_silver_to_gold.py
-│   └── openfda_silver_to_gold.py
-└── ml/
-    └── openfda_features.py
-```
-
-Parquet is used for analytical datasets because it provides typed columns, columnar storage, compression, and efficient downstream analytical access.
-
----
-
-# 8. Synapse Serverless
-
-Synapse Serverless SQL is the SQL access and serving layer over ADLS.
-
-Conceptually:
-
-```text
-ADLS
- │
- ├── Gold
- │
- └── ML
-      │
-      ▼
-Synapse Serverless
-      │
-      ├── SQL validation
-      ├── Analytical queries
-      └── Power BI connectivity
-```
-
-The project uses the following openFDA ML serving views:
-
-```text
+dbo.vw_openfda_analytics
 dbo.vw_openfda_ml_predictions
 dbo.vw_openfda_feature_importance
 dbo.vw_openfda_anomalies
 ```
 
-The Synapse layer allows downstream consumers to query analytical files without requiring a Dedicated SQL Pool.
+These views provide a stable SQL interface between lake-based analytical outputs and Power BI.
+
+This separates storage and transformation concerns from the business-facing reporting layer.
 
 ---
 
-# 9. Power BI
+# 9. Machine Learning Architecture
 
-Power BI Desktop provides the business intelligence layer.
+The ML workload focuses on **OpenFDA adverse-event analytics**.
 
-The implemented serving pattern is:
+It contains two complementary analytical components:
+
+1. supervised seriousness classification
+2. unsupervised anomaly screening
+
+The ML feature engineering module is:
 
 ```text
-ADLS
- │
- ▼
-Synapse Serverless
- │
- ▼
-Power BI Desktop
+transformations/ml/openfda_features.py
 ```
 
-The dashboard can combine:
+The generated ML feature dataset contains:
 
-* Public-health trends
-* Event volumes
-* Regional patterns
-* Data-quality indicators
-* Operational latency
-* openFDA analytical metrics
-* ML predictions
-* Feature importance
-* Anomaly indicators
+```text
+1,000 rows
+13 columns
+```
 
-ML outputs are presented as analytical signals.
+Important engineered features include:
 
-They are not presented as clinical decisions, causal findings, or confirmed safety risks.
+```text
+number_of_reactions
+number_of_drugs
+transmission_year
+transmission_month
+reporting_delay_days
+target_serious
+drug_reaction_ratio
+```
 
-For anomaly reporting, the interpretation is:
+Potential leakage fields such as:
 
-> Isolation Forest identifies observations with unusual feature patterns for review. It does not indicate fraud, causality, or clinical risk.
+```text
+seriousnessdeath
+fulfillexpeditecriteria
+patientdeathdate
+companynumb
+```
+
+are excluded from model features.
+
+The report identifier is retained for traceability but is not used as a predictive feature.
 
 ---
 
-# 10. Databricks Free Edition
+# 10. Databricks ML Execution
 
-Databricks Free Edition is used as the ML and PySpark execution environment.
+Databricks Free Edition is used as a separate ML execution environment.
 
-The primary notebook is:
-
-```text
-notebooks/Day6_OpenFDA_ML.ipynb
-```
-
-The implemented workflow includes:
-
-* Feature engineering
-* Categorical and numerical preprocessing
-* XGBoost classification
-* Model evaluation
-* Feature importance
-* Isolation Forest anomaly detection
-* SHAP-based interpretation
-* MLflow experiment/model tracking
-
-The Databricks working storage boundary is:
+The project uses a managed Unity Catalog volume:
 
 ```text
 /Volumes/workspace/default/openfda_ml/
 ```
 
-The resulting ML datasets are handed off to the canonical ADLS ML layer through a controlled manual process.
+The ML workflow includes:
 
-The architecture therefore does not claim fully automated direct ADLS integration from Databricks Free Edition.
+```text
+ADLS / local ML feature preparation
+              ↓
+       Databricks ML
+              ↓
+       XGBoost model
+              ↓
+     ML predictions
+              ↓
+     Isolation Forest
+              ↓
+     anomaly outputs
+              ↓
+       ML diagnostics
+```
 
-The detailed implementation boundary is documented in:
+The project also uses SHAP-based explainability and MLflow capabilities within the ML experimentation workflow.
+
+### Free Edition integration boundary
+
+Databricks Free Edition does not provide the required unrestricted external ADLS integration configuration for this project.
+
+Therefore, the current implementation uses a **controlled manual handoff** from the Databricks-managed environment back into the canonical ADLS ML layer.
+
+The project does not claim fully automated Databricks-to-ADLS orchestration.
+
+The canonical ML outputs are:
+
+```text
+healthcare/ml/openfda/
+├── openfda_ml_features.parquet
+├── openfda_ml_predictions.parquet
+├── openfda_feature_importance.parquet
+└── openfda_anomalies.parquet
+```
+
+This limitation is documented in:
 
 ```text
 docs/databricks-integration.md
-```
-
-The formal architectural decision is recorded in:
-
-```text
 docs/adr/ADR-005-databricks-free-edition-integration.md
 ```
 
 ---
 
-# 11. Machine Learning Architecture
+# 11. ML Model Results
 
-The openFDA ML workflow is:
+The XGBoost seriousness-classification experiment was evaluated on a 200-row holdout set.
 
-```text
-OpenFDA Silver
-      │
-      ▼
-Feature Engineering
-      │
-      ▼
-ML Feature Dataset
-      │
-      ▼
-Train / Test Split
-      │
-      ├───────────────┐
-      ▼               ▼
-   XGBoost      Isolation Forest
-      │               │
-      ▼               ▼
-Predictions       Anomalies
-      │
-      ├───────────────┐
-      ▼               ▼
-Feature Importance    SHAP
-      │
-      ▼
-Parquet Outputs
-      │
-      ▼
-ADLS ML Layer
-      │
-      ▼
-Synapse Serverless
-      │
-      ▼
-Power BI
-```
-
-The XGBoost model was evaluated on a 200-row holdout sample.
-
-Observed metrics:
+Recorded metrics:
 
 | Metric    | Result |
 | --------- | -----: |
@@ -670,344 +745,472 @@ Observed metrics:
 | ROC-AUC   | 0.8759 |
 | PR-AUC    | 0.8803 |
 
-The majority-class baseline accuracy was 0.545.
-
-These results demonstrate the implemented ML workflow and should not be interpreted as production-level predictive performance.
-
-The dataset is a project sample and is not assumed to represent the complete openFDA reporting population.
-
----
-
-# 12. Infrastructure as Code
-
-Terraform provides the infrastructure-as-code foundation.
-
-Current structure:
+Confusion matrix:
 
 ```text
-infra/
-└── terraform/
+True Negative  = 91
+False Positive = 18
+False Negative = 26
+True Positive   = 65
 ```
 
-The current Terraform configuration is intentionally a foundation rather than a complete recreation of the existing Azure environment.
-
-The project environment was provisioned incrementally during development.
-
-Existing resources are therefore not recreated or destroyed solely to place them under Terraform management.
-
-Future infrastructure can be imported selectively into Terraform state where this provides operational value.
-
-The Terraform foundation is intended to demonstrate:
-
-* Infrastructure-as-code structure
-* AzureRM provider usage
-* Configuration separation
-* Resource outputs and variables
-* A path toward reproducible infrastructure management
-
----
-
-# 13. CI/CD Architecture
-
-GitHub Actions provides repository-level CI/CD validation.
-
-## Continuous Integration
-
-CI runs on:
-
-* Pushes to `main`
-* Pushes to feature branches
-* Pull requests targeting `main`
-
-CI performs:
+The majority-class baseline accuracy was approximately:
 
 ```text
-Checkout
-   │
-   ▼
-Python setup
-   │
-   ▼
-Dependency installation
-   │
-   ▼
-Python compilation
-   │
-   ▼
-Whitespace validation
-   │
-   ▼
-pytest
+0.545
 ```
 
-The test suite validates transformation and data-quality logic without requiring the live Azure environment.
+These results demonstrate the mechanics of an ML analytics workflow but should not be interpreted as clinical performance.
+
+The dataset is relatively small and is not intended to establish a production-ready predictive model.
 
 ---
 
-## Controlled Release Validation
+# 12. Anomaly Detection
 
-CD is implemented as a manually triggered release-validation workflow.
+Isolation Forest is used to identify observations with unusual feature patterns.
 
-It validates a selected branch, tag, or commit by running:
+Configuration used for the demonstrated experiment:
 
-* Dependency installation
-* Python compilation
-* Whitespace validation
-* Full repository tests
-* GitHub release summary
+```text
+n_estimators = 200
+contamination = 0.05
+random_state = 42
+n_jobs = -1
+```
 
-The current CD workflow does not automatically recreate, modify, or destroy Azure infrastructure.
+The model was applied to the 200-row holdout set.
 
-This is deliberate because the current Azure environment was provisioned incrementally and is documented separately from repository release validation.
+Recorded result:
+
+```text
+Validated rows:       200
+Detected anomalies:   10
+```
+
+Anomaly outputs contain:
+
+```text
+safetyreportid
+anomaly_prediction
+anomaly_score
+is_anomaly
+```
+
+The anomaly model is a screening mechanism.
+
+It does not indicate:
+
+* fraud
+* causality
+* clinical risk
+* medical diagnosis
+* confirmed data quality failure
+
+---
+
+# 13. Power BI Architecture
+
+Power BI provides the business-facing analytical layer.
+
+The general serving flow is:
+
+```text
+ADLS analytical outputs
+        ↓
+Synapse Serverless
+        ↓
+SQL views
+        ↓
+Power BI
+```
+
+Power BI consumes:
+
+* CDC analytical outputs
+* OpenFDA analytical outputs
+* ML predictions
+* feature importance
+* anomaly results
+* ML evaluation metrics
+
+The ML dashboard includes:
+
+```text
+FACT_OPENFDA_FEATURE_IMPORTANCE
+FACT_OPENFDA_ANOMALIES
+ML Metrics
+```
+
+The dashboard presents ML outputs as analytical diagnostics rather than clinical decision support.
+
+For example, anomaly visualizations are framed as:
+
+> Isolation Forest identifies observations with unusual feature patterns for review. It does not indicate fraud, causality, or clinical risk.
+
+OpenFDA metrics are similarly interpreted as reporting-pattern analytics rather than evidence of causal drug safety effects.
 
 ---
 
 # 14. Security and Governance
 
-The project follows a least-privilege and identity-based access approach where supported by the environment.
+The project applies several security and governance principles.
 
-Key controls include:
+## Identity and access
 
-* Azure RBAC
-* Managed identity for Synapse access to ADLS
-* ADF managed identity for storage access where configured
-* Secure handling of API credentials
-* No secrets committed to Git
-* GitHub Actions `contents: read` permission
-* Data-layer separation
-* Quarantine of invalid streaming events
+* Azure RBAC is used for data-lake access.
+* Managed identity is used for Synapse access to ADLS.
+* ADF uses secured parameter handling for the openFDA API key.
+* Secrets and connection strings are not committed to Git.
+* GitHub Actions uses read-only repository permissions for validation workflows.
+
+## Data classification
+
+The project uses:
+
+* public openFDA data
+* archived public CDC data
+* synthetic test/replay data
+
+No PHI is introduced into the portfolio environment.
+
+## Data governance
+
+Important governance controls include:
+
+* source preservation in RAW
+* validation before analytical promotion
+* quarantine of malformed records
+* deterministic event identifiers
+* preservation of event-time and ingestion-time
 * ML leakage controls
-* Analytical rather than clinical interpretation of ML outputs
+* explicit ML limitations
+* controlled serving-layer access
 
-The project uses public and synthetic data.
-
-It does not contain PHI or patient-identifiable clinical records.
-
-The project does not currently implement enterprise controls such as:
+Known production-hardening areas not implemented in this portfolio environment include:
 
 * Azure Key Vault integration
-* Private endpoints
-* Customer-managed keys
-* Full network isolation
+* private endpoints
+* VNet isolation
+* customer-managed encryption keys
 * Microsoft Purview governance
-* Enterprise SIEM integration
+* enterprise SIEM integration
+* production-grade Databricks external locations
 
-These are documented as production-evolution opportunities rather than claimed capabilities.
-
----
-
-# 15. Service Responsibility Matrix
-
-| Component               | Primary Responsibility                              |
-| ----------------------- | --------------------------------------------------- |
-| Azure Event Hubs        | Streaming event ingestion                           |
-| Python producer         | Historical CDC event replay                         |
-| Python consumer         | Kafka consumption, validation, and ADLS persistence |
-| ADLS Gen2               | Canonical lake storage                              |
-| Azure Data Factory      | Batch ingestion and cloud orchestration             |
-| Python/Pandas/PyArrow   | Primary transformation processing                   |
-| Databricks Free Edition | PySpark and ML experimentation/execution            |
-| Synapse Serverless      | SQL querying, validation, and serving               |
-| Power BI Desktop        | Business intelligence and visualization             |
-| Terraform               | Infrastructure-as-code foundation                   |
-| GitHub Actions          | CI/CD validation                                    |
-| dbt                     | Not part of the core runtime                        |
+These are documented limitations rather than implied capabilities.
 
 ---
 
-# 16. Key Architecture Principles
+# 15. CI/CD and Engineering Controls
 
-## Separation of Concerns
+GitHub Actions provides repository-level CI/CD validation.
 
-Each component has a defined responsibility rather than being included simply to increase the number of technologies.
+## Continuous Integration
 
-## Reproducibility
+CI validates:
 
-The streaming workload uses a deterministic historical replay fixture so that ingestion behavior and fault handling can be repeatedly tested.
+* Python compilation
+* repository formatting/whitespace
+* automated tests
+* transformation and application code
 
-## Data Lineage
+The CI workflow runs automatically on relevant pushes and pull requests.
 
-The Raw → Bronze → Silver → Gold progression provides traceability through the analytical data lifecycle.
+## Controlled Release Validation
 
-## Data Quality by Design
+CD is implemented as a manually triggered release-validation workflow.
 
-Invalid records are quarantined instead of being silently discarded.
+It validates:
 
-## Identity-Based Access
+* the selected release reference
+* Python environment
+* repository formatting
+* Python compilation
+* full test suite
 
-Managed identities and RBAC are preferred over embedding long-lived storage credentials in pipeline configuration.
+The current CD workflow does not automatically create or destroy Azure infrastructure.
 
-## Explicit Data Grain
-
-Analytical datasets are designed around clearly defined grains rather than being treated as generic tables.
-
-## Platform-Aware Design
-
-The architecture explicitly accounts for the limitations of Databricks Free Edition instead of assuming that it provides the same integration capabilities as a provisioned Azure Databricks environment.
-
-## Cost Awareness
-
-The project deliberately avoids unnecessary infrastructure such as:
-
-* AKS
-* Virtual machines
-* Dedicated Synapse SQL Pool
-* Unnecessary monitoring stacks
-* Private networking
-* Additional Azure Databricks infrastructure
-
-The architecture is designed around the available project environment and trial/free-resource constraints.
+This separation prevents the project from claiming automated infrastructure deployment that has not been implemented.
 
 ---
 
-# 17. Current Architecture Status
+# 16. Terraform Infrastructure-as-Code Foundation
 
-The project has progressed from the initial Day 0 foundation to an implemented Day 8 portfolio architecture.
+Terraform is included as an infrastructure-as-code foundation.
 
-| Capability                                     | Status                                   |
-| ---------------------------------------------- | ---------------------------------------- |
-| ADLS Gen2                                      | Implemented and validated                |
-| Event Hubs / Kafka                             | Implemented and validated                |
-| CDC historical replay                          | Implemented and validated                |
-| CDC Bronze / quarantine flow                   | Implemented and validated                |
-| ADF openFDA ingestion                          | Implemented and validated                |
-| openFDA Silver / Gold                          | Implemented and validated                |
-| Data-quality test suite                        | Implemented and passing                  |
-| Synapse Serverless                             | Implemented and validated                |
-| Power BI serving                               | Implemented                              |
-| Databricks Free Edition ML                     | Implemented and validated                |
-| XGBoost classification                         | Implemented and evaluated                |
-| Isolation Forest                               | Implemented and evaluated                |
-| SHAP explainability                            | Implemented                              |
-| MLflow experiment/model tracking               | Implemented within project scope         |
-| Databricks → ADLS handoff                      | Implemented as controlled manual handoff |
-| GitHub Actions CI                              | Implemented                              |
-| GitHub Actions controlled CD validation        | Implemented                              |
-| Security/governance documentation              | Implemented                              |
-| Terraform foundation                           | Implemented                              |
-| Full Terraform recreation of Azure environment | Not implemented                          |
-| Enterprise production controls                 | Outside current scope                    |
-
----
-
-# 18. Architecture Evolution
-
-The project evolved from a simple Azure foundation into a multi-layer analytical platform.
-
-The progression was:
+Current structure:
 
 ```text
-Day 0
-Azure foundation
-      │
-      ▼
-ADLS + Event Hubs
-      │
-      ▼
-Day 1–4
-ADF + CDC streaming
-      │
-      ▼
-Day 5
-Medallion transformations
-      │
-      ▼
-Day 6
-Databricks ML
-      │
-      ▼
-Day 7
-Synapse + Power BI serving
-      │
-      ▼
-Day 8
-CI/CD + data quality
-+ security/governance
-+ architecture decisions
-+ Terraform foundation
+infra/terraform/
+├── main.tf
+├── variables.tf
+├── outputs.tf
+├── versions.tf
+├── README.md
+└── .terraform.lock.hcl
 ```
 
-This evolution reflects incremental engineering rather than attempting to provision every component before validating the preceding layer.
+The current Terraform configuration intentionally contains no Azure resource blocks.
+
+Therefore:
+
+```text
+Terraform
+   │
+   ├── provider configuration
+   ├── environment variables
+   ├── outputs
+   └── validation
+```
+
+rather than:
+
+```text
+Terraform
+   │
+   └── full Azure resource ownership
+```
+
+The existing Azure environment was provisioned incrementally during project development.
+
+Future infrastructure management could selectively import existing resources or deliberately recreate resources under Terraform control after appropriate validation.
 
 ---
 
-# 19. Related Documentation
+# 17. Architecture Principles
 
-Key supporting documents include:
+The architecture is based on a small number of deliberate principles:
 
-```text
-docs/
-├── architecture.md
-├── architecture-decisions.md
-├── databricks-integration.md
-├── data-contract.md
-├── data-sources.md
-├── day4-cdc-streaming.md
-├── day7-power-bi-serving.md
-├── security-governance.md
-└── adr/
-    └── ADR-005-databricks-free-edition-integration.md
-```
-
-The architecture overview describes the overall platform.
-
-Architecture decisions document why major design choices were made.
-
-Individual ADRs provide formal records for significant architectural decisions.
-
-Implementation-specific documentation provides deeper details for individual components.
+1. ADLS Gen2 provides the common lake storage boundary.
+2. Batch and streaming workloads use patterns appropriate to their operational characteristics.
+3. Historical CDC replay provides a reproducible streaming workload without claiming a live production CDC source.
+4. ADF handles openFDA batch orchestration.
+5. Event Hubs provides the streaming ingestion endpoint.
+6. Python provides explicit transformation and streaming-validation logic.
+7. Parquet provides the analytical storage format.
+8. Synapse Serverless provides SQL-based serving over the lake.
+9. Databricks Free Edition provides a separate ML execution environment within its platform constraints.
+10. The controlled Databricks → ADLS handoff is documented as a workaround rather than presented as production orchestration.
+11. Terraform establishes an infrastructure-as-code foundation without falsely claiming full management of the existing environment.
+12. GitHub Actions validates application and data-engineering code separately from infrastructure provisioning.
+13. Public and synthetic data are used to avoid introducing PHI into the portfolio environment.
 
 ---
 
-# 20. Summary
+# 18. Service Responsibility Matrix
 
-The final architecture separates Azure ingestion and orchestration from Databricks ML execution while maintaining ADLS Gen2 as the common logical data boundary.
+| Capability          | Technology                                      | Responsibility                            |
+| ------------------- | ----------------------------------------------- | ----------------------------------------- |
+| Batch ingestion     | Azure Data Factory                              | openFDA REST ingestion and scheduling     |
+| Streaming endpoint  | Azure Event Hubs                                | Event ingestion                           |
+| Streaming producer  | Python                                          | Historical CDC replay                     |
+| Streaming consumer  | Python                                          | Validation and ADLS persistence           |
+| Data lake           | ADLS Gen2                                       | Canonical storage                         |
+| Data transformation | Python / Pandas / PyArrow                       | Silver and Gold processing                |
+| SQL serving         | Synapse Serverless                              | SQL access over lake data                 |
+| ML execution        | Databricks Free Edition                         | Model training and analytics              |
+| ML modeling         | XGBoost / Isolation Forest                      | Classification and anomaly screening      |
+| Explainability      | SHAP                                            | Feature-level model diagnostics           |
+| Experiment tracking | MLflow                                          | ML experiment/model tracking capabilities |
+| BI                  | Power BI                                        | Business-facing analytics                 |
+| Code validation     | GitHub Actions / pytest                         | Automated repository validation           |
+| IaC foundation      | Terraform                                       | Infrastructure-as-code foundation         |
+| Governance          | Azure RBAC / managed identities / documentation | Access and security controls              |
 
-The core Azure path is:
+---
+
+# 19. Current Architecture Status
+
+| Area                                        | Status                                      |
+| ------------------------------------------- | ------------------------------------------- |
+| ADLS Gen2                                   | Implemented                                 |
+| Event Hubs                                  | Implemented                                 |
+| Kafka-compatible streaming                  | Implemented                                 |
+| Historical CDC replay                       | Implemented                                 |
+| CDC validation/quarantine                   | Implemented                                 |
+| openFDA ADF ingestion                       | Implemented                                 |
+| openFDA pagination                          | Implemented and validated                   |
+| Silver transformations                      | Implemented                                 |
+| Gold transformations                        | Implemented                                 |
+| Synapse Serverless serving                  | Implemented                                 |
+| Power BI serving                            | Implemented                                 |
+| OpenFDA ML feature engineering              | Implemented                                 |
+| XGBoost seriousness classification          | Implemented                                 |
+| Isolation Forest anomaly screening          | Implemented                                 |
+| SHAP diagnostics                            | Implemented                                 |
+| MLflow workflow                             | Implemented within ML experimentation scope |
+| Databricks → ADLS automation                | Not implemented due Free Edition constraint |
+| Security/governance documentation           | Implemented                                 |
+| CI validation                               | Implemented                                 |
+| Controlled CD validation                    | Implemented                                 |
+| Terraform foundation                        | Implemented                                 |
+| Full Terraform Azure resource management    | Not implemented                             |
+| Production-grade network/security hardening | Not implemented                             |
+
+---
+
+# 20. Architecture Evolution
+
+The current architecture is intentionally suitable for a portfolio environment while documenting how it could evolve.
+
+A future production-oriented implementation could introduce:
 
 ```text
-External Sources
-      │
-      ├───────────────┐
-      ▼               ▼
-     ADF          Event Hubs
-      │               │
-      ▼               ▼
-  ADLS RAW       Python Consumer
-      │               │
-      └───────┬───────┘
-              ▼
-           Bronze
-              │
-              ▼
-           Silver
-              │
-              ▼
-            Gold
-              │
-       ┌──────┴──────┐
-       ▼             ▼
-    Synapse       ML-ready
-       │             │
-       ▼             ▼
-   Power BI      Databricks
-                    Free Edition
-                       │
-                       ▼
-                  ML Outputs
-                       │
-                controlled handoff
-                       │
-                       ▼
-                    ADLS ML
-                       │
-                       ▼
-                  Synapse
-                       │
-                       ▼
-                   Power BI
+Current
+   │
+   ├── Databricks Free Edition
+   │
+   ├── Manual ML output handoff
+   │
+   ├── Terraform foundation
+   │
+   └── Public/synthetic data
+   │
+   ▼
+Potential Production Evolution
+   │
+   ├── Enterprise Databricks workspace
+   ├── Automated ADLS external locations
+   ├── Managed orchestration across ingestion/ML
+   ├── Full Terraform resource management
+   ├── Azure Key Vault
+   ├── Private networking
+   ├── Centralized monitoring
+   ├── Data catalog/governance
+   └── Production identity and security controls
 ```
 
-The architecture prioritizes clear ownership of responsibilities, reproducibility, data quality, identity-based access, explicit platform constraints, and cost awareness.
+These future capabilities are architectural evolution options and are not represented as currently implemented features.
 
-It documents the system as actually implemented rather than presenting planned or unavailable capabilities as completed functionality.
+---
+
+# 21. Related Documentation
+
+### Architecture decisions
+
+```text
+docs/architecture-decisions.md
+```
+
+Provides the consolidated rationale for the major architectural decisions.
+
+### Architecture Decision Records
+
+```text
+docs/adr/
+```
+
+Contains the detailed decision records:
+
+```text
+ADR-001-adls.md
+ADR-002-event-hubs.md
+ADR-003-batch-vs-streaming.md
+ADR-004-replay-vs-live-api.md
+ADR-005-databricks-free-edition-integration.md
+ADR-006-dbT-runtime-decision.md
+ADR-007-openfda-batch-ingestion.md
+```
+
+### Data documentation
+
+```text
+docs/data-sources.md
+docs/data-contract.md
+```
+
+### ML documentation
+
+```text
+docs/databricks-integration.md
+```
+
+### Security
+
+```text
+docs/security-governance.md
+```
+
+### Power BI and serving
+
+```text
+docs/day7-power-bi-serving.md
+```
+
+### Terraform
+
+```text
+infra/terraform/README.md
+```
+
+---
+
+# 22. Final Architecture Summary
+
+The implemented platform separates batch and streaming ingestion while using ADLS Gen2 as the common storage boundary.
+
+```text
+openFDA
+   │
+   ▼
+ADF
+   │
+   ▼
+ADLS
+   │
+   ├── Bronze
+   ├── Silver
+   └── Gold
+          │
+          ▼
+     Synapse Serverless
+          │
+          ▼
+       Power BI
+
+
+Historical CDC
+      │
+      ▼
+Python Replay
+      │
+      ▼
+Event Hubs
+      │
+      ▼
+Python Consumer
+      │
+      ▼
+ADLS
+      │
+      ├── Bronze
+      ├── Silver
+      ├── Gold
+      └── Quarantine
+
+
+OpenFDA ML Features
+      │
+      ▼
+Databricks Free Edition
+      │
+      ├── XGBoost
+      ├── SHAP
+      └── Isolation Forest
+      │
+      ▼
+Controlled ML Output Handoff
+      │
+      ▼
+ADLS ML
+      │
+      ▼
+Synapse Serverless
+      │
+      ▼
+Power BI
+```
+
+The architecture demonstrates practical data-engineering patterns across ingestion, streaming, lakehouse storage, transformation, data quality, SQL serving, BI, machine learning, governance, CI/CD and infrastructure-as-code.
+
+Where platform limitations or incomplete production capabilities exist, they are explicitly documented rather than represented as implemented functionality.
