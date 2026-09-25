@@ -1,5 +1,7 @@
 # Healthcare Public Health Surveillance & Risk Analytics Lakehouse
 
+[![CI](https://github.com/nabila-natasha/healthcare-public-health-lakehouse/actions/workflows/ci.yml/badge.svg)](https://github.com/nabila-natasha/healthcare-public-health-lakehouse/actions/workflows/ci.yml)
+
 An Azure-based healthcare and public-health analytics lakehouse portfolio project demonstrating batch ingestion, event-driven streaming, medallion architecture, data quality controls, analytical serving, machine learning, explainability, governance, CI/CD, and infrastructure-as-code foundations.
 
 The project uses **public and synthetic data only**. It does not use real patient-identifiable information or PHI.
@@ -904,8 +906,6 @@ See [`docs/security-governance.md`](docs/security-governance.md).
 ---
 
 ## 18. CI and Controlled Release Validation
-
-[![CI](https://github.com/nabila-natasha/healthcare-public-health-lakehouse/actions/workflows/ci.yml/badge.svg)](https://github.com/nabila-natasha/healthcare-public-health-lakehouse/actions/workflows/ci.yml)
 
 GitHub Actions is used to automatically validate repository changes.
 
