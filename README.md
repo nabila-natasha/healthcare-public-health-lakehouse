@@ -61,7 +61,7 @@ The project was designed to answer practical data-engineering questions such as:
           Python Consumer                 ADLS Gen2 BRONZE
                  │                                 │
                  ▼                                 │
-          ADLS Gen2 BRONZE                        │
+          ADLS Gen2 BRONZE                         │
                  │                                 │
                  └──────────────┬──────────────────┘
                                 │
@@ -99,7 +99,26 @@ See [`docs/architecture.md`](docs/architecture.md) for the detailed architecture
 
 ---
 
-## 4. Technology Stack
+## 4. Visual Evidence
+
+### Power BI
+
+The Power BI dashboard provides the business-facing analytical layer for
+openFDA adverse-event analytics, ML predictions, model metrics, feature
+importance, and anomaly screening.
+
+![Power BI dashboard](docs/screenshots/powerbi-openfda-ml.PNG)
+
+### Azure Data Factory
+
+The ADF pipeline orchestrates paginated openFDA batch ingestion into ADLS Gen2.
+
+![ADF openFDA pipeline](docs/screenshots/adf-openfda-pipeline.PNG)
+
+
+---
+
+## 5. Technology Stack
 
 | Area                   | Technology                   |
 | ---------------------- | ---------------------------- |
@@ -122,7 +141,7 @@ See [`docs/architecture.md`](docs/architecture.md) for the detailed architecture
 
 ---
 
-## 5. Data Sources
+## 6. Data Sources
 
 ### CDC public-health surveillance data
 
@@ -160,7 +179,7 @@ The project treats adverse-event reports as observational safety-reporting data.
 
 ---
 
-## 6. Lakehouse Data Layers
+## 7. Lakehouse Data Layers
 
 The project follows a medallion-style structure.
 
@@ -241,7 +260,7 @@ healthcare/ml/openfda/
 
 ---
 
-## 7. Streaming Data Engineering
+## 8. Streaming Data Engineering
 
 The CDC pipeline demonstrates a streaming ingestion pattern using Azure Event Hubs and a Python consumer.
 
@@ -291,7 +310,7 @@ The malformed event was quarantined rather than silently discarded.
 
 ---
 
-## 8. Batch Data Engineering
+## 9. Batch Data Engineering
 
 Azure Data Factory is used for openFDA batch ingestion.
 
@@ -328,7 +347,7 @@ The scheduled trigger is configured for daily execution.
 
 ---
 
-## 9. Transformation Pipeline
+## 10. Transformation Pipeline
 
 Python transformation modules implement the Silver and Gold processing stages.
 
@@ -354,7 +373,7 @@ Parquet is used for analytical datasets because it provides:
 
 ---
 
-## 10. Data Quality
+## 11. Data Quality
 
 The project includes automated validation using pytest.
 
@@ -376,7 +395,7 @@ The test suite is executed automatically by GitHub Actions.
 
 ---
 
-## 11. Machine Learning
+## 12. Machine Learning
 
 The ML component focuses on **adverse-event seriousness classification and anomaly screening**.
 
@@ -429,7 +448,7 @@ Confusion matrix:
 True Negative  = 91
 False Positive = 18
 False Negative = 26
-True Positive   = 65
+True Positive  = 65
 ```
 
 These results are reported as experimental model results on the project dataset. They should not be interpreted as clinical performance or population-level predictive performance.
@@ -475,7 +494,7 @@ MLflow is used within the Databricks experimentation workflow for experiment tra
 
 ---
 
-## 12. Databricks Integration Boundary
+## 13. Databricks Integration Boundary
 
 Databricks Free Edition is used as an ML experimentation environment.
 
@@ -519,7 +538,7 @@ See [`docs/databricks-integration.md`](docs/databricks-integration.md) and [`doc
 
 ---
 
-## 13. SQL Serving
+## 14. SQL Serving
 
 Azure Synapse Serverless SQL provides the analytical serving layer.
 
@@ -546,7 +565,7 @@ Power BI connects to the Synapse serving layer rather than directly embedding th
 
 ---
 
-## 14. Power BI
+## 15. Power BI
 
 Power BI Desktop provides the business-facing analytical layer.
 
@@ -570,7 +589,7 @@ It does not represent:
 
 ---
 
-## 15. Security and Governance
+## 16. Security and Governance
 
 The project demonstrates several cloud-security principles:
 
@@ -608,7 +627,7 @@ See [`docs/security-governance.md`](docs/security-governance.md).
 
 ---
 
-## 16. CI/CD
+## 17. CI/CD
 
 GitHub Actions provides automated repository validation.
 
@@ -640,7 +659,7 @@ This reflects the current implementation boundary: application/data-engineering 
 
 ---
 
-## 17. Infrastructure as Code
+## 18. Infrastructure as Code
 
 Terraform is included as an infrastructure-as-code foundation.
 
@@ -670,7 +689,7 @@ See [`infra/terraform/README.md`](infra/terraform/README.md).
 
 ---
 
-## 18. Architecture Decisions
+## 19. Architecture Decisions
 
 Major architecture decisions are documented in:
 
@@ -696,7 +715,7 @@ The project deliberately avoids creating ADRs for minor implementation details.
 
 ---
 
-## 19. Repository Structure
+## 20. Repository Structure
 
 ```text
 healthcare-public-health-lakehouse/
@@ -748,7 +767,7 @@ healthcare-public-health-lakehouse/
 
 ---
 
-## 20. Current Azure Environment
+## 21. Current Azure Environment
 
 | Component            | Resource                 |
 | -------------------- | ------------------------ |
@@ -766,7 +785,7 @@ healthcare-public-health-lakehouse/
 
 ---
 
-## 21. Engineering Outcomes
+## 22. Engineering Outcomes
 
 The completed project demonstrates practical experience with:
 
@@ -794,7 +813,7 @@ The completed project demonstrates practical experience with:
 
 ---
 
-## 22. Important Limitations
+## 23. Important Limitations
 
 This is a portfolio engineering project rather than a production healthcare platform.
 
@@ -812,7 +831,7 @@ These limitations are documented deliberately to distinguish demonstrated functi
 
 ---
 
-## 23. Future Production Evolution
+## 24. Future Production Evolution
 
 A production-oriented extension could introduce:
 
@@ -832,7 +851,7 @@ These are future capabilities, not claims about the current implementation.
 
 ---
 
-## 24. Project Documentation
+## 25. Project Documentation
 
 | Document                                                           | Purpose                                 |
 | ------------------------------------------------------------------ | --------------------------------------- |
@@ -849,7 +868,7 @@ These are future capabilities, not claims about the current implementation.
 
 ---
 
-## 25. Final Summary
+## 26. Final Summary
 
 This project demonstrates an end-to-end healthcare/public-health data platform built around Azure lakehouse patterns.
 
