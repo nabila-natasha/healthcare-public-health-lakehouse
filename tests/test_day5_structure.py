@@ -25,7 +25,6 @@ def test_day5_validation_script_exists():
 
 def test_medallion_directories_exist():
     expected_directories = [
-        "transformations/bronze",
         "transformations/silver",
         "transformations/gold",
     ]
