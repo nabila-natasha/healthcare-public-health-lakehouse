@@ -559,10 +559,10 @@ Azure Data Factory
 Paginated API Requests
       │
       ▼
-ADLS RAW
+   ADLS RAW
       │
       ▼
-Bronze
+    Bronze
 ```
 
 The implemented validation demonstrated:
@@ -1035,9 +1035,10 @@ healthcare-public-health-lakehouse/
 │
 ├── .github/
 │   └── workflows/
-│
+├── .env.example
 ├── .gitignore
-└── README.md
+├── README.md
+└── requirements.txt
 ```
 
 Large runtime datasets and ML Parquet outputs are intentionally not committed to GitHub.
