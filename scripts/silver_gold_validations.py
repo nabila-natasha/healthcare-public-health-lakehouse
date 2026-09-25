@@ -128,11 +128,11 @@ def validate_openfda() -> None:
     print(f"Drug records: {len(drugs)}")
     print(f"Duplicate report IDs: {duplicate_ids}")
 
-    assert len(events) == 100
-    assert events["safetyreportid"].nunique() == 100
+    assert len(events) == 1000
+    assert events["safetyreportid"].nunique() == 1000
     assert duplicate_ids == 0
-    assert len(reactions) == 247
-    assert len(drugs) == 265
+    assert len(reactions) == 2749
+    assert len(drugs) == 3079
 
     check_no_nulls(
         events,
@@ -155,8 +155,8 @@ def validate_openfda() -> None:
     print(f"Countries: {gold['reporter_country'].nunique()}")
     print(f"Duplicate grain: {duplicate_grain}")
 
-    assert len(gold) == 15
-    assert gold["reporter_country"].nunique() == 11
+    assert len(gold) == 78
+    assert gold["reporter_country"].nunique() == 34
     assert duplicate_grain == 0
 
     check_no_nulls(
