@@ -1,4 +1,3 @@
-# Healthcare Public Health Surveillance & Risk Analytics Lakehouse
 
 ## 1. Architecture Overview
 
