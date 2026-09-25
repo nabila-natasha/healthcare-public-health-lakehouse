@@ -905,7 +905,7 @@ See [`docs/security-governance.md`](docs/security-governance.md).
 
 ## 18. CI and Controlled Release Validation
 
-![CI](https://github.com/nabila-natasha/healthcare-public-health-lakehouse/actions/workflows/ci.yml/badge.svg)
+[![CI](https://github.com/nabila-natasha/healthcare-public-health-lakehouse/actions/workflows/ci.yml/badge.svg)](https://github.com/nabila-natasha/healthcare-public-health-lakehouse/actions/workflows/ci.yml)
 
 GitHub Actions is used to automatically validate repository changes.
 
