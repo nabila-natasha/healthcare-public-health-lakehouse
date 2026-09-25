@@ -1,8 +1,8 @@
 # ADR-007: Databricks Free Edition Integration Boundary
 
-**Status:** Accepted
-**Date:** 19 September 2026
-**Decision Type:** Architecture / Platform Constraint
+**Status:** Accepted  
+**Date:** 19 September 2026  
+**Decision Type:** Architecture / Platform Constraint  
 
 ---
 
