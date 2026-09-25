@@ -1,8 +1,8 @@
 # ADR-004: Controlled Replay vs Live API Consumption
 
-**Status:** Accepted
-**Date:** 2026-09-21
-**Decision owners:** Project implementation team
+**Status:** Accepted  
+**Date:** 2026-09-21  
+**Decision owners:** Project implementation team  
 
 ---
 
