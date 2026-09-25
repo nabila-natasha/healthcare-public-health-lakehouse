@@ -36,6 +36,10 @@ jobs:
         run: |
           python -m compileall ingestion scripts transformations
 
+      - name: Check for whitespace errors
+        run: |
+          git diff --check
+
       - name: Run repository tests
         run: |
           pytest -q

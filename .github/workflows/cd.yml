@@ -1,0 +1,71 @@
+name: Healthcare Lakehouse CD
+
+# CONTROLLED RELEASE VALIDATION
+#
+# This workflow is intentionally manual.
+# CI validates changes automatically on push and pull request.
+# CD performs a final release validation only when the project
+# is intentionally promoted.
+#
+# Azure infrastructure is not recreated or destroyed by this workflow.
+# The current portfolio environment was provisioned incrementally
+# and is documented separately from this release workflow.
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_ref:
+        description: "Git branch, tag, or commit to validate for release"
+        required: true
+        default: "main"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  release-validation:
+    name: Release Validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout release reference
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.release_ref }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Check for whitespace errors
+        run: |
+          git diff --check
+
+      - name: Compile Python source
+        run: |
+          python -m compileall ingestion scripts transformations
+
+      - name: Run full test suite
+        run: |
+          pytest -q
+
+      - name: Generate release summary
+        run: |
+          echo "## Healthcare Lakehouse Release Validation" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Release reference: \`${{ inputs.release_ref }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Python version: 3.12" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Python compilation: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Repository tests: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Whitespace validation: passed" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "This workflow performs controlled release validation." >> "$GITHUB_STEP_SUMMARY"
+          echo "It does not recreate or destroy Azure infrastructure." >> "$GITHUB_STEP_SUMMARY"
