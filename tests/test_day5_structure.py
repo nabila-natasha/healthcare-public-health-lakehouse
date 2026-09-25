@@ -27,6 +27,7 @@ def test_medallion_directories_exist():
     expected_directories = [
         "transformations/silver",
         "transformations/gold",
+        "transformations/ml",
     ]
 
     for directory in expected_directories:
