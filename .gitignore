@@ -27,7 +27,6 @@ secrets.local
 .azure/
 
 # Python
-__pycache__/
 *.py[cod]
 .venv/
 venv/
@@ -177,7 +176,6 @@ activemq-data/
 *.sage.py
 
 # Environments
-.env
 *.env
 .envrc
 .venv
