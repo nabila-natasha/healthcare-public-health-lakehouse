@@ -1,8 +1,8 @@
 # ADR-002: Use Azure Event Hubs for the Streaming Transport Layer
 
-**Status:** Accepted
-**Date:** 2026-09-21
-**Decision owners:** Project implementation team
+**Status:** Accepted  
+**Date:** 2026-09-21  
+**Decision owners:** Project implementation team  
 
 ---
 
