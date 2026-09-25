@@ -1,8 +1,8 @@
 # ADR-001: Use ADLS Gen2 as the Lakehouse Storage Layer
 
-**Status:** Accepted
-**Date:** 2026-09-21
-**Decision owners:** Project implementation team
+**Status:** Accepted  
+**Date:** 2026-09-21  
+**Decision owners:** Project implementation team  
 
 ---
 
