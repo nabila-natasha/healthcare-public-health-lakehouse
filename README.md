@@ -1011,6 +1011,8 @@ healthcare-public-health-lakehouse/
 │
 ├── scripts/
 │
+├── sql/
+│
 ├── transformations/
 │   ├── silver/
 │   ├── gold/
