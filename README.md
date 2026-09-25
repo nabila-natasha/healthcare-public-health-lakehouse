@@ -903,11 +903,13 @@ See [`docs/security-governance.md`](docs/security-governance.md).
 
 ---
 
-## 18. CI/CD
+## 18. CI and Controlled Release Validation
 
-GitHub Actions validates repository code and documentation.
+![CI](https://github.com/nabila-natasha/healthcare-public-health-lakehouse/actions/workflows/ci.yml/badge.svg)
 
-The validation workflow includes:
+GitHub Actions is used to automatically validate repository changes.
+
+The CI workflow includes:
 
 * Python tests
 * Python compilation checks
@@ -915,9 +917,20 @@ The validation workflow includes:
 * data-engineering transformation tests
 * documentation consistency checks
 
-The project intentionally separates application/data-engineering CI/CD from infrastructure provisioning.
+The project also includes a manually triggered **controlled release-validation workflow**. It validates an intentionally selected branch, tag, or commit before release.
 
-Terraform is validated independently.
+The release-validation workflow:
+
+* checks out the selected release reference
+* installs the project dependencies
+* validates repository whitespace
+* compiles Python source
+* runs the full pytest suite
+* generates a release summary
+
+The release-validation workflow does **not** recreate, destroy, or deploy Azure infrastructure. The Azure portfolio environment was provisioned incrementally and is documented separately.
+
+Terraform validation is performed independently from the application/data-engineering CI workflow.
 
 ---
 
