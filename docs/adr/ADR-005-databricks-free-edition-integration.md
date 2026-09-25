@@ -38,7 +38,7 @@ The project therefore needs an explicit integration boundary rather than assumin
 
 ## Decision
 
-Databricks Free Edition will be used as a **separate ML/PySpark execution environment** rather than as the primary Azure ingestion layer.
+Databricks Free Edition will be used as a **separate ML/PySpark execution environment** rather than as the primary Azure ingestion/orchestration engine.
 
 The primary Azure data path will remain:
 
@@ -189,9 +189,11 @@ The Azure ingestion and data-processing architecture remains automated wherever 
 
 ## Future Production Evolution
 
-If the project were moved to a production environment, Databricks Free Edition could be replaced with Azure Databricks.
+If the project were moved to a production environment, Databricks Free Edition could be replaced with a provisioned Azure Databricks environment.
 
-The architecture could then become:
+A production implementation could then use supported cloud-storage integrations, managed identities, external locations, and automated orchestration appropriate to the selected Databricks and Azure configuration.
+
+The conceptual architecture could become:
 
 ```text
 ADF / Event Hubs
@@ -213,24 +215,64 @@ Azure Databricks
 Synapse / Power BI
 ```
 
-This would remove the Free Edition integration boundary and allow a more tightly integrated cloud lakehouse architecture.
+The exact production integration would depend on the selected Azure Databricks configuration, identity model, storage permissions, and orchestration approach.
 
-That change is intentionally outside the scope of the current project.
+That production migration is intentionally outside the scope of the current project.
+
 
 ---
 
 ## Validation
 
-Day 0 validated:
+The integration boundary was validated during the ML implementation.
 
-* ADLS Gen2 connectivity
-* Event Hubs Kafka connectivity
-* Synapse Serverless access to ADLS
-* Power BI connectivity
-* Databricks Free Edition availability
-* Terraform/AzureRM provider initialization
+The project successfully demonstrated:
 
-The Databricks integration boundary will be validated further when the ML workflow is implemented.
+* Databricks Free Edition notebook execution.
+* PySpark-based ML workflow execution.
+* XGBoost classification.
+* Isolation Forest anomaly detection.
+* SHAP-based feature-importance analysis.
+* MLflow experiment/model tracking capabilities used within the Databricks environment.
+* Export of ML outputs as Parquet files.
+* Controlled handoff of ML outputs into the canonical ADLS Gen2 ML layer.
+* Synapse Serverless access to the resulting ML files.
+* Power BI serving of ML predictions, feature-importance, and anomaly outputs.
+
+The Databricks Free Edition environment did not provide the required arbitrary ADLS storage configuration for the intended direct integration pattern. Therefore, the project used a managed Unity Catalog volume as the Databricks working storage boundary and a controlled manual handoff for the resulting Parquet outputs.
+
+The implemented workflow was therefore:
+
+```text
+ADLS / prepared ML dataset
+        │
+        │ controlled dataset handoff
+        ▼
+Databricks Free Edition
+        │
+        ├── ML feature engineering
+        ├── XGBoost classification
+        ├── Isolation Forest
+        ├── SHAP
+        └── MLflow
+        │
+        ▼
+Managed Unity Catalog volume
+        │
+        │ controlled Parquet export
+        ▼
+ADLS Gen2 ML layer
+        │
+        ▼
+Synapse Serverless
+        │
+        ▼
+Power BI
+```
+
+This validates the architectural boundary while making the Free Edition limitation explicit.
+
+The implementation does **not** claim fully automated Databricks-to-ADLS orchestration.
 
 ---
 
