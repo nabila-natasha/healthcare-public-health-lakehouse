@@ -1,12 +1,8 @@
 # ADR-006: dbt Runtime Decision
 
-## Status
-
-Accepted
-
-## Date
-
-2026-09-18
+**Status:** Accepted  
+**Date:** 18 September 2026  
+**Decision Type:** Platform / Tooling Constraint & Architecture 
 
 ## Context
 
